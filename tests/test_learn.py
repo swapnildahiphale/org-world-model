@@ -57,3 +57,92 @@ def test_learning_disabled_is_a_noop(seed_cwm):
     observe(seed_cwm, "productcatalogservice::EXTRA_LATENCY", {"frontend"},
             {"frontend": 0.0}, learning_enabled=False)
     assert seed_cwm.g.number_of_edges() == before
+
+
+# --- Week-2: optional CALLS-edge learning -----------------------------------
+
+def _call_edge(cwm, caller, callee):
+    return cwm.g.get_edge_data(caller, callee, key=Rel.CALLS)
+
+
+def test_default_observe_leaves_call_edges_untouched():
+    """Backward-compat: WITHOUT learn_call_edges, seeded CALLS edges are byte-for-byte
+    unchanged — same Beta(1,1) seed (alpha=1, beta=1, weight=0.5) the topology set."""
+    cwm = CausalWorldModel()
+    cwm.add_node("frontend", Kind.SERVICE, mitigation=0.0)
+    cwm.add_node("productcatalogservice", Kind.SERVICE, mitigation=0.0)
+    cwm.add_edge("frontend", "productcatalogservice", Rel.CALLS,
+                 weight=0.5, source="given", alpha=1.0, beta=1.0)
+
+    # callee impacted, caller impacted -> would update IF the flag were on; it isn't.
+    observe(cwm, "frontend::SOME_KNOB", {"frontend", "productcatalogservice"},
+            {}, learn_call_edges=False)
+
+    d = _call_edge(cwm, "frontend", "productcatalogservice")
+    assert d["alpha"] == 1.0 and d["beta"] == 1.0
+    assert d["weight"] == 0.5
+
+
+def test_default_on_seed_fixture_leaves_all_call_edges_untouched(seed_cwm):
+    """Same guarantee on the real seeded fixture: an incident that hits real callees
+    must not perturb any CALLS edge when learning call edges is off (the default)."""
+    before = {
+        (u, v): (d["alpha"], d["beta"], d["weight"])
+        for u, v, k, d in seed_cwm.g.edges(keys=True, data=True) if k == Rel.CALLS
+    }
+    observe(seed_cwm, "productcatalogservice::EXTRA_LATENCY",
+            {"frontend", "productcatalogservice", "recommendationservice"},
+            {}, learning_enabled=True)  # learn_call_edges defaults False
+    after = {
+        (u, v): (d["alpha"], d["beta"], d["weight"])
+        for u, v, k, d in seed_cwm.g.edges(keys=True, data=True) if k == Rel.CALLS
+    }
+    assert after == before
+
+
+def test_call_edge_learning_caller_and_callee_impacted_raises_weight():
+    """callee in blast AND caller in blast -> positive obs: alpha++, weight rises above seed."""
+    cwm = CausalWorldModel()
+    cwm.add_node("frontend", Kind.SERVICE, mitigation=0.0)
+    cwm.add_node("productcatalogservice", Kind.SERVICE, mitigation=0.0)
+    cwm.add_edge("frontend", "productcatalogservice", Rel.CALLS,
+                 weight=0.5, source="given", alpha=1.0, beta=1.0)
+
+    observe(cwm, "frontend::SOME_KNOB", {"frontend", "productcatalogservice"},
+            {}, learn_call_edges=True)
+
+    d = _call_edge(cwm, "frontend", "productcatalogservice")
+    assert d["alpha"] == 2.0 and d["beta"] == 1.0
+    assert d["weight"] > 0.5
+
+
+def test_call_edge_learning_callee_impacted_caller_not_drops_weight():
+    """callee in blast but caller NOT -> failure didn't propagate: beta++, weight drops below seed."""
+    cwm = CausalWorldModel()
+    cwm.add_node("frontend", Kind.SERVICE, mitigation=0.0)
+    cwm.add_node("productcatalogservice", Kind.SERVICE, mitigation=0.0)
+    cwm.add_edge("frontend", "productcatalogservice", Rel.CALLS,
+                 weight=0.5, source="given", alpha=1.0, beta=1.0)
+
+    observe(cwm, "productcatalogservice::SOME_KNOB", {"productcatalogservice"},
+            {}, learn_call_edges=True)
+
+    d = _call_edge(cwm, "frontend", "productcatalogservice")
+    assert d["alpha"] == 1.0 and d["beta"] == 2.0
+    assert d["weight"] < 0.5
+
+
+def test_call_edge_learning_callee_not_impacted_is_untouched():
+    """No signal when the callee isn't in the blast: edge stays at its Beta(1,1) seed."""
+    cwm = CausalWorldModel()
+    cwm.add_node("frontend", Kind.SERVICE, mitigation=0.0)
+    cwm.add_node("productcatalogservice", Kind.SERVICE, mitigation=0.0)
+    cwm.add_edge("frontend", "productcatalogservice", Rel.CALLS,
+                 weight=0.5, source="given", alpha=1.0, beta=1.0)
+
+    # Only the caller is impacted; callee is clean -> this edge carries no signal.
+    observe(cwm, "frontend::SOME_KNOB", {"frontend"}, {}, learn_call_edges=True)
+
+    d = _call_edge(cwm, "frontend", "productcatalogservice")
+    assert d["alpha"] == 1.0 and d["beta"] == 1.0
+    assert d["weight"] == 0.5

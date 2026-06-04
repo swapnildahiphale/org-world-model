@@ -39,3 +39,68 @@ def test_file_ownership_by_directory():
 def test_productcatalog_endpoints_extracted():
     eps = parsed().endpoints["productcatalogservice"]
     assert set(eps) == {"ListProducts", "GetProduct", "SearchProducts"}
+
+
+_RESOURCE_MANIFEST = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myservice
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: server
+          env:
+            - name: DISABLE_PROFILER
+              value: "1"
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+"""
+
+
+def test_resource_and_replica_config_nodes(tmp_path):
+    (tmp_path / "kubernetes-manifests.yaml").write_text(_RESOURCE_MANIFEST)
+    cfg = set(parse_repo(tmp_path).config_nodes)
+
+    # scale + resource knobs become inert config nodes
+    assert "myservice::REPLICAS" in cfg
+    assert "myservice::LIMITS_CPU" in cfg
+    assert "myservice::REQUESTS_CPU" in cfg
+    assert "myservice::LIMITS_MEMORY" in cfg
+    assert "myservice::REQUESTS_MEMORY" in cfg
+    # ordinary non-addr env var still becomes a config node alongside them
+    assert "myservice::DISABLE_PROFILER" in cfg
+
+
+def test_resource_knobs_robust_to_missing_fields(tmp_path):
+    # No replicas, no resources: only the env-var config node should appear,
+    # and no resource/replica knobs should be invented.
+    manifest = (
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        "  name: bareservice\n"
+        "spec:\n"
+        "  template:\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: server\n"
+        "          env:\n"
+        "            - name: DISABLE_PROFILER\n"
+        "              value: \"1\"\n"
+    )
+    (tmp_path / "kubernetes-manifests.yaml").write_text(manifest)
+    cfg = parse_repo(tmp_path).config_nodes
+
+    assert "bareservice::DISABLE_PROFILER" in cfg
+    for knob in ("REPLICAS", "LIMITS_CPU", "REQUESTS_CPU", "LIMITS_MEMORY", "REQUESTS_MEMORY"):
+        assert f"bareservice::{knob}" not in cfg
+    # resource knobs create no edges
+    assert parse_repo(tmp_path).call_edges == []

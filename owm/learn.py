@@ -12,6 +12,8 @@ from __future__ import annotations
 from owm.graph import CausalWorldModel, Kind, Rel, LEARNED
 from owm.topology import beta_weight
 
+__all__ = ["observe", "update_edge"]
+
 SURPRISE_THRESHOLD = 0.1
 NEW_EDGE_ALPHA = 2.0   # prior Beta(1,1) + this incident's one positive observation
 NEW_EDGE_BETA = 1.0
@@ -35,8 +37,37 @@ def update_edge(cwm: CausalWorldModel, src: str, dst: str, rel: str, *, impacted
 
 
 def observe(cwm: CausalWorldModel, origin: str, impacted_services, predicted_probs,
-            *, learning_enabled: bool = True, surprise_threshold: float = SURPRISE_THRESHOLD) -> None:
-    """Apply one incident: origin (a class node) caused `impacted_services` to degrade."""
+            *, learning_enabled: bool = True, surprise_threshold: float = SURPRISE_THRESHOLD,
+            learn_call_edges: bool = False) -> None:
+    """Apply one incident: origin (a class node) caused `impacted_services` to degrade.
+
+    By default (``learn_call_edges=False``) this updates/adds only COUPLES edges,
+    exactly as in Week-1 — the seeded CALLS edges (Beta(1,1) from ``seed_graph``)
+    are left untouched, which is the long-standing gap.
+
+    Week-2 heuristic (opt-in, ``learn_call_edges=True``)
+    ---------------------------------------------------
+    AFTER the COUPLES pass, also Beta-update the seeded CALLS edges with a simple,
+    local credit rule. For every CALLS edge ``caller -> callee`` we only consider
+    it as carrying signal when its **callee was in the observed blast**; if the
+    callee was not impacted, the edge tells us nothing this incident and is left
+    alone. When the callee *was* impacted:
+
+      * ``caller`` also impacted  -> ``update_edge(..., Rel.CALLS, impacted=True)``
+        The fault propagating *along this call* is consistent with the observed
+        blast (callee broke and so did its caller), so this edge gets a positive
+        observation: alpha += 1, posterior mean (weight) rises toward 1.
+      * ``caller`` NOT impacted    -> ``update_edge(..., Rel.CALLS, impacted=False)``
+        The callee broke but its caller did *not* go down, i.e. failure did not
+        propagate across this edge this time — evidence the edge is weak: beta += 1,
+        posterior mean (weight) falls toward 0.
+
+    This is deliberately a per-edge *local* rule (no path attribution, no
+    saturation model) — defensible as a first-order credit assignment and easy to
+    audit. It is strictly additive: it never creates, removes, or reorders edges,
+    and runs only when explicitly enabled, so the default behavior is byte-for-byte
+    unchanged for every existing caller.
+    """
     if not learning_enabled:
         return
     impacted = set(impacted_services)
@@ -58,3 +89,17 @@ def observe(cwm: CausalWorldModel, origin: str, impacted_services, predicted_pro
             )
         # was_impacted but engine already predicted it (>=threshold) and no couples
         # edge => the given topology covered it; do not add a redundant edge.
+
+    if learn_call_edges:
+        # Week-2 opt-in: Beta-update seeded CALLS edges via the local credit rule
+        # documented above. Collect the matching edges first so we never mutate the
+        # MultiDiGraph while iterating over it.
+        call_edges = [
+            (caller, callee)
+            for caller, callee, key in cwm.g.edges(keys=True)
+            if key == Rel.CALLS
+        ]
+        for caller, callee in call_edges:
+            if callee not in impacted:
+                continue  # callee was not in the blast -> no signal for this edge
+            update_edge(cwm, caller, callee, Rel.CALLS, impacted=caller in impacted)

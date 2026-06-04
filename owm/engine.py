@@ -9,9 +9,12 @@ from owm.learn import observe
 
 
 class OWMEngine:
-    def __init__(self, cwm, learning_enabled: bool = True):
+    def __init__(self, cwm, learning_enabled: bool = True, learn_call_edges: bool = False):
         self.cwm = cwm
         self.learning_enabled = learning_enabled
+        # Week-2 opt-in: also Beta-update seeded CALLS edges from incidents.
+        # Defaults False so existing engines/tests are byte-for-byte unaffected.
+        self.learn_call_edges = learn_call_edges
 
     def predict(self, scenario, pack=None) -> Prediction:
         probs = predict_blast(
@@ -30,4 +33,5 @@ class OWMEngine:
         origin = scenario.touched_configs[0]
         pre = self.predict(scenario).probs
         observe(self.cwm, origin, impacted_services, pre,
-                learning_enabled=self.learning_enabled)
+                learning_enabled=self.learning_enabled,
+                learn_call_edges=self.learn_call_edges)

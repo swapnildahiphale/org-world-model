@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -68,6 +69,34 @@ def default_scenarios() -> list[Scenario]:
         Scenario(id="negative-flag-1", stratum="hidden", role="negative",
                  hidden_edge=None, touched_configs=(BENIGN_KNOB,), s_t="healthy"),
     ]
+
+
+def _slug(origin: str) -> str:
+    """origin config-node string -> filesystem/id-safe slug.
+
+    Lowercase, then map "::" and every other non-alphanumeric run to a single "-"
+    (e.g. "currencyservice::LIMITS_CPU" -> "currencyservice-limits-cpu").
+    """
+    return re.sub(r"[^a-z0-9]+", "-", origin.lower()).strip("-")
+
+
+def coupling_scenarios(couplings: list[str]) -> list[Scenario]:
+    """For each coupling origin config-node (e.g. "currencyservice::LIMITS_CPU"),
+    produce a TEACH scenario and a TRANSFER scenario over the SAME parsed knob.
+
+    Both are stratum="hidden", s_t="healthy", and touch only that one config node.
+    teach id = f"teach-{slug}", transfer id = f"transfer-{slug}". This mirrors the
+    canonical latency family but generalizes it to an arbitrary set of held-out
+    couplings for the k-fold harness.
+    """
+    out: list[Scenario] = []
+    for origin in couplings:
+        slug = _slug(origin)
+        out.append(Scenario(id=f"teach-{slug}", stratum="hidden", role="teach",
+                            touched_configs=(origin,), s_t="healthy"))
+        out.append(Scenario(id=f"transfer-{slug}", stratum="hidden", role="transfer",
+                            touched_configs=(origin,), s_t="healthy"))
+    return out
 
 
 def _canonical(scenarios: list[Scenario]) -> str:

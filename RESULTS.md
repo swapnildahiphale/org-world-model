@@ -89,6 +89,65 @@ amplifies on exactly the coupled services — recommendationservice +0.167, fron
 - **No abstention / risk–coverage yet.** Calibration is shown via the deepening curve and the
   reliability plot (`docs/reliability.png`), not yet an abstention policy.
 
+## Multi-pass deepening — does it keep improving over many passes? (live, 2026-06-04)
+
+The result above folds **one** incident. The natural next question — *fold many, and watch how
+the system behaves.* We re-ran on the same cluster and gathered **8 measurement windows** of the
+`EXTRA_LATENCY=3s` fault under light, steady load, treating **each window as one learning pass**,
+and folded them one at a time.
+
+**Measured per-window structure (the real coupling), origin excluded:**
+
+| service | windows degraded | rate |
+|---|---:|---:|
+| frontend | 8 / 8 | 1.00 |
+| recommendationservice | 8 / 8 | 1.00 |
+| checkoutservice | 5 / 8 | **0.62** (intermittent) |
+| all others | 0 / 8 | 0.00 |
+
+Denoised binary blast **D = {frontend, recommendationservice}** — `checkoutservice` is *below* the
+2/3 majority, so it's excluded from the hard blast (the non-topological selectivity, recovered at
+light load), but it is genuinely a **partial** coupling.
+
+**Convergence over passes** (`docs/multipass_convergence.png`):
+
+- **Per-window Brier** (the faithful probabilistic score): **0.219 (pre) → 0.041 (8 passes)** — ~5×
+  — while the learning-**off** ablation stays flat at 0.219. The gain is entirely the learning.
+- **Learned weights converge to the empirical rates:** frontend → 0.90, recommendationservice → 0.90
+  (both climbing toward 1.0), checkoutservice → ~0.75 toward its 0.62 rate. The engine learns a
+  **graded** coupling — checkout is *partially* coupled — which a topology view
+  (checkout calls productcatalog ⇒ checkout is in the blast) gets wrong as a hard 1.
+
+**Live engine vs real Opus** (k-fold harness, HIDDEN-stratum Brier vs the binary blast `D`):
+
+| predictor | HIDDEN Brier | reading |
+|---|---:|---|
+| **OWM engine** (after 8 passes) | **0.067** | best — learns + calibrates the coupling |
+| Opus + RAG (handed the incident history) | 0.083 | retrieval helps, still loses to the deepened graph |
+| BFS / ablation / engine-pre | 0.167 | topology can't reach a disconnected config node |
+| stateless Opus (no memory) | 0.250 | worst — cannot predict a non-topological coupling |
+
+Deepening **0.167 → 0.067**; ablation **flat 0.167 → 0.167**; engine beats **all three** baselines,
+including the RAG-Opus that was *handed* the incidents.
+
+**Honest notes:**
+
+- **Calibration vs the binary label.** Against the *collapsed* binary blast, learning checkout's
+  intermittency slightly *raises* Brier (0.026 at pass 2 → 0.067 at pass 8) — the binary label
+  discards the graded truth. The **per-window** score (which rewards calibration) improves
+  monotonically. Both are reported; the engine wins on both vs the LLM/BFS.
+- **One coupling.** Online Boutique's fault surface is thin: `EXTRA_LATENCY` exists only on
+  productcatalog; CPU-limit squeezes don't bite on near-idle services (recommendation at 25m under
+  light load → empty blast) and under heavy load their blast collapses to "all callers"
+  (topological). So the multi-pass *depth* is on the single latency coupling, and the bootstrapped
+  CI is degenerate at k = 1. Breadth across genuinely non-topological couplings needs a richer
+  fault surface (e.g. an app with per-service latency knobs).
+- Same two honesty rules hold: headline only on the HIDDEN stratum; the taught node
+  (`productcatalogservice::EXTRA_LATENCY`) is the genuinely-parsed, inert config node.
+
+Artifacts: `docs/multipass_convergence.png`, `docs/multipass.json`, `docs/reliability_kfold.png`,
+`docs/results_kfold.json`.
+
 ## Reproduce
 
 ```
@@ -98,6 +157,15 @@ amplifies on exactly the coupled services — recommendationservice +0.167, fron
    --repo-manifest data/online_boutique/repo/release/kubernetes-manifests.yaml \
    --provider claude-code --self-consistency-n 5 --out results_live
 .venv/bin/python -m scripts.check_wins results_live/results.json
+
+# multi-pass (k couplings, within-coupling deepening): measured GT + per-window incident stream
+.venv/bin/python -m scripts.run_kfold \
+   --repo-manifest <staged manifest with EXTRA_LATENCY=0s> \
+   --ground-truth data/groundtruth/ground_truth_kfold_live.json \
+   --incidents data/groundtruth/incidents_kfold_live.json \
+   --provider claude-code --out results_kfold_live
 ```
 
-Committed copy: raw output `docs/results.json`, calibration plot `docs/reliability.png` (regenerate into `results_live/` with the command above).
+Committed copies: single-pass raw `docs/results.json` + `docs/reliability.png`; multi-pass
+`docs/results_kfold.json`, `docs/multipass.json`, and the convergence plot
+`docs/multipass_convergence.png`.

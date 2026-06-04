@@ -14,6 +14,7 @@ data/online_boutique/repo/
 results/
 
 results_live/
+results_kfold_live/
 
 # internal design docs — kept locally for reference, not published
 docs/superpowers/

@@ -43,6 +43,41 @@ def _envs(dep: dict) -> list[dict]:
     return out
 
 
+def _containers(dep: dict) -> list[dict]:
+    spec = dep.get("spec") or {}
+    template = spec.get("template") or {}
+    tspec = template.get("spec") or {}
+    return tspec.get("containers") or []
+
+
+def _resource_knobs(dep: dict) -> list[str]:
+    """Genuine scale/resource config knobs declared in the manifest.
+
+    These are real surfaces a change can touch, but — like any config knob —
+    their downstream blast is NOT statically knowable, so we emit them as inert
+    `<KNOB>` nodes and deliberately create no edges (Rule 2). Returns the knob
+    suffixes (e.g. "REPLICAS", "LIMITS_CPU") in a stable, deduped order.
+    """
+    knobs: list[str] = []
+    spec = dep.get("spec") or {}
+    if spec.get("replicas") is not None:
+        knobs.append("REPLICAS")
+
+    # resources.{limits,requests}.{cpu,memory} on any container
+    pairs = (
+        ("limits", "cpu", "LIMITS_CPU"),
+        ("limits", "memory", "LIMITS_MEMORY"),
+        ("requests", "cpu", "REQUESTS_CPU"),
+        ("requests", "memory", "REQUESTS_MEMORY"),
+    )
+    for c in _containers(dep):
+        resources = c.get("resources") or {}
+        for bucket, key, knob in pairs:
+            if (resources.get(bucket) or {}).get(key) is not None and knob not in knobs:
+                knobs.append(knob)
+    return knobs
+
+
 def parse_repo(root: Path) -> ParsedCode:
     root = Path(root)
     pc = ParsedCode()
@@ -59,6 +94,12 @@ def parse_repo(root: Path) -> ParsedCode:
                 pc.call_edges.append((svc, m.group("host")))
             else:
                 pc.config_nodes.append(f"{svc}::{name}")
+        # scale/resource knobs that genuinely exist in the manifest become
+        # inert config nodes too (no edges — their blast radius is learned, Rule 2).
+        for knob in _resource_knobs(dep):
+            node = f"{svc}::{knob}"
+            if node not in pc.config_nodes:
+                pc.config_nodes.append(node)
     pc.services.sort()
 
     # --- ownership (from src/<service>/) ---
