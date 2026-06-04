@@ -12,17 +12,34 @@ The **Org World Model** makes that model explicit, shared, and queryable. It fus
 
 ---
 
-## Why a world model, not a bigger prompt
+## Is this just a fancy graph?
 
-Today's AI engineering tools are **stateless decoders**: every prompt, they re-derive an understanding of your system from text, act, and forget. They hold no persistent model of *your* system and they don't learn from *your* incidents. Retrieval/RAG lets them fetch the **observable** layer — the code, the docs, past tickets — but it structurally cannot accumulate a **causal model of consequences**.
+Fair question — and the honest answer is empirical, not rhetorical.
 
-An Org World Model is a different kind of object:
+A graph is a **map**: it tells you what connects to what. A world model is a **predictor of consequences**: given an action *and the current state*, it says what will happen — and it can be *wrong*, *checked against reality*, and *corrected*. Four behaviors separate the two, and OWM has all four:
 
-- **Persistent** — one model that lives *between* questions and *across* changes, not a context window that resets.
-- **Causal & intervention-capable** — you ask `do(change)`, not just "what's textually related?"
-- **State-aware** — the *same* change has a *different* blast radius on a healthy vs. an already-saturated system; the model conditions on current state.
-- **Calibrated** — it reports how sure it is, and (on the roadmap) abstains and asks a human when it isn't.
-- **Self-deepening** — every outcome refines it; a *surprise* (something it judged safe that broke) teaches it a coupling it never knew. A stateless model, handed the same logs, retains nothing.
+- **Interventional, not associational** — it answers `do(change)` with forward-propagated probabilities, not "what's adjacent." Reachability over a dependency graph is a strictly weaker query.
+- **State-conditioned** — the *same* change has a *different* blast radius on a healthy vs. a saturated system; a static graph cannot express that.
+- **Self-correcting from outcomes** — it updates from what actually happened, and a *surprise* (something it judged safe that broke) teaches it a coupling the graph never had.
+- **Calibrated** — every edge is a probability *with* an uncertainty, and we measure whether "70%" actually means 70%.
+
+And you don't have to take that on faith — **"it's just a graph" is literally one of our baselines:**
+
+| what you're testing | HIDDEN-stratum Brier (lower is better) |
+|---|---:|
+| topology reachability over the static graph (BFS) | 0.083 |
+| the full model with **learning switched off** (ablation) | 0.083 — no better than the graph |
+| the full world model — interventional + state-aware + learning + calibrated | **0.013** |
+
+*The graph alone* gets you 0.083. The drop to **0.013** is produced by the world-model behavior — the learning, the state-conditioning, the calibration — **not** by the box-and-arrow diagram. That measured gap is the entire point: the graph is only the **substrate** (a [deliberately swappable one](#design-note--the-substrate-is-swappable)); *"world model" is the name for what it does with it*.
+
+> It is not a world model in the neural-latent-dynamics sense (Ha & Schmidhuber); it's a **structured causal world model** — an explicit graph with Bayesian, outcome-earned weights — the way a physics simulator with known equations and estimated parameters is still a model of the world. What it is *not* is a knowledge graph you query for neighbors.
+
+---
+
+## Why not just a bigger prompt?
+
+Today's AI engineering tools are **stateless decoders**: every prompt they re-derive an understanding of your system from text, act, and forget — no persistent model of *your* system, no memory of *your* incidents. Retrieval/RAG helps them fetch the **observable** layer (code, docs, past tickets), but retrieval is *lookup, not learning*: it can surface that an incident happened, yet it cannot fold that incident's lesson into a model that changes the *next* prediction. The Org World Model is **persistent and accumulative** — it lives between questions and sharpens from every outcome. That's an architectural difference, not a prompt-engineering one.
 
 ---
 
@@ -187,6 +204,50 @@ A world model is only as credible as its evaluation. Two rules are enforced, and
 ## Design note — the substrate is swappable
 
 Today the substrate is an explicit graph with Bayesian weights: the most tractable way to get causal, intervention-capable, *deepening* behavior. But the architecture (*signals → propose/decide → queryable model → outcome loop*) and its metrics are deliberately **substrate-agnostic** — a learned world model or a specialized model could sit underneath without changing the contract.
+
+## FAQ
+
+<details>
+<summary><strong>What exactly is "the model" — a saved artifact, or just code?</strong></summary>
+
+<br/>
+
+Structure **plus** parameters. The structure is a typed graph (services, config knobs, files, incidents; edges like `calls`, `depends_on`, `couples`). The parameters are **Beta distributions** on the learned coupling edges — a probability *with* an uncertainty. That pair *is* the model, the same way a Bayesian network is a graph plus probability tables, or a neural net is an architecture plus weights. The code (`parse` → `propagate` → `learn`) is the **engine** — initialization, inference, and the update rule — not the model.
+
+Honest caveat: today the model is **not** persisted to disk. Each run rebuilds it from the manifests (structure) and the incident log (experience), so the durable memory currently lives in the incident log and the model is recomputed each run. Saving it as a load-and-continue checkpoint is on the roadmap — but that's *storage*, not the line between a model and a script.
+</details>
+
+<details>
+<summary><strong>Is this a prediction model or a world model?</strong></summary>
+
+<br/>
+
+It *emits* predictions, but it isn't a one-task predictor. It models the system's **causal mechanism** — how a change propagates — so the same learned model answers any change, under any state, including counterfactuals ("what would have broken if the system were healthy?"). A prediction model is `f(x) → y` trained for a single target; this is the model-based-RL sense of a world model: learn the dynamics once, query them many ways.
+</details>
+
+<details>
+<summary><strong>Do I need an API key or a cluster to try it?</strong></summary>
+
+<br/>
+
+Not for the offline path. `python -m scripts.run --offline` runs the engine and its learning against a **stub** LLM — no key, no cluster — and still produces the honest deepening signal (before/after Brier with the ablation flat). The full **engine-vs-real-LLM** contest needs a live LLM (an Anthropic API key, or the Claude Code CLI) and a cluster to *measure* ground truth from traces. See [RESULTS.md](RESULTS.md).
+</details>
+
+<details>
+<summary><strong>Does one coupling on one app really prove the claim?</strong></summary>
+
+<br/>
+
+It demonstrates the **mechanism** convincingly — on cluster-measured ground truth, against real Opus, with a pre-registered protocol and a learning-disabled ablation to isolate the cause. It is **not yet** a k-fold result over many hidden couplings with bootstrapped confidence intervals; that, and scaling beyond a single app, are on the roadmap. The honest limits are spelled out in [RESULTS.md](RESULTS.md).
+</details>
+
+<details>
+<summary><strong>Is this a "world model" in the neural-latent (Ha &amp; Schmidhuber) sense?</strong></summary>
+
+<br/>
+
+No, and we don't claim it. It's a **structured causal world model** — an explicit graph with Bayesian, outcome-earned weights — the way a physics simulator with known equations and estimated parameters is still a model of the world. The architecture and metrics are deliberately substrate-agnostic, so a learned/latent model could sit underneath later without changing the contract. What it is *not* is a knowledge graph you query for neighbors.
+</details>
 
 ## Citing
 
