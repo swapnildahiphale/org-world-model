@@ -1,0 +1,6 @@
+{"scenario_id": "live-extra-latency", "stratum": "hidden",
+ "runs": [
+   ["frontend", "recommendationservice"],
+   ["frontend", "recommendationservice"],
+   ["frontend"]
+ ]}

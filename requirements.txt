@@ -1,0 +1,16 @@
+# Core — the graph + propagation (deliberately light for a spike)
+networkx>=3.2
+
+# Metrics + the deepening curve
+numpy>=1.26
+matplotlib>=3.8
+
+# Stateless-LLM baseline (provider chosen at runtime via env; both optional)
+anthropic>=0.39
+openai>=1.40
+
+# Static parse of manifests
+pyyaml>=6.0
+
+# Tests
+pytest>=8.0

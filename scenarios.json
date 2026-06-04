@@ -1,0 +1,46 @@
+[
+  {
+    "hidden_edge": null,
+    "id": "given-pc-handler",
+    "role": null,
+    "s_t": "healthy",
+    "stratum": "given",
+    "touched_configs": [],
+    "touched_services": [
+      "productcatalogservice"
+    ]
+  },
+  {
+    "hidden_edge": null,
+    "id": "negative-flag-1",
+    "role": "negative",
+    "s_t": "healthy",
+    "stratum": "hidden",
+    "touched_configs": [
+      "productcatalogservice##flag"
+    ],
+    "touched_services": []
+  },
+  {
+    "hidden_edge": "pc-latency-coupling",
+    "id": "teach-latency-1",
+    "role": "teach",
+    "s_t": "healthy",
+    "stratum": "hidden",
+    "touched_configs": [
+      "productcatalogservice##latency"
+    ],
+    "touched_services": []
+  },
+  {
+    "hidden_edge": "pc-latency-coupling",
+    "id": "transfer-latency-1",
+    "role": "transfer",
+    "s_t": "healthy",
+    "stratum": "hidden",
+    "touched_configs": [
+      "productcatalogservice##latency"
+    ],
+    "touched_services": []
+  }
+]

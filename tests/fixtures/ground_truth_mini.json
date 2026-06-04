@@ -1,0 +1,6 @@
+[
+  {"scenario_id": "given-pc-handler", "stratum": "given",
+   "impacted": ["frontend", "recommendationservice"]},
+  {"scenario_id": "hidden-extra-latency", "stratum": "hidden",
+   "impacted": ["frontend", "recommendationservice"]}
+]

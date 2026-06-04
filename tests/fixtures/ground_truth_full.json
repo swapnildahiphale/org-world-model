@@ -1,0 +1,7 @@
+[
+  {"scenario_id": "given-pc-handler", "stratum": "given",
+   "impacted": ["frontend", "recommendationservice"]},
+  {"scenario_id": "transfer-latency-1", "stratum": "hidden",
+   "impacted": ["frontend", "recommendationservice"]},
+  {"scenario_id": "negative-flag-1", "stratum": "hidden", "impacted": []}
+]

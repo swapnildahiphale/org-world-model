@@ -1,0 +1,42 @@
+{
+  "mode": "live",
+  "note": "live LLM baselines",
+  "hidden_brier": {
+    "engine_pre": 0.08333333333333333,
+    "engine": 0.012988683127572016,
+    "stateless_llm": 0.12666666666666668,
+    "rag_llm": 0.026666666666666672,
+    "bfs": 0.08333333333333333
+  },
+  "given_brier": {
+    "engine": 0.06438654119318182,
+    "stateless_llm": 0.18181818181818182,
+    "rag_llm": 0.0,
+    "bfs": 0.18181818181818182
+  },
+  "deepening": {
+    "engine": {
+      "brier_pre": 0.08333333333333333,
+      "brier_post": 0.012988683127572016
+    },
+    "engine_no_learning": {
+      "brier_pre": 0.08333333333333333,
+      "brier_post": 0.08333333333333333
+    }
+  },
+  "state_contrast": {
+    "loadgenerator": 0.0625,
+    "shippingservice": 0.0,
+    "checkoutservice": 0.0,
+    "redis-cart": 0.0,
+    "paymentservice": 0.0,
+    "productcatalogservice": 0.0,
+    "cartservice": 0.0,
+    "emailservice": 0.0,
+    "currencyservice": 0.0,
+    "frontend": 0.125,
+    "adservice": 0.0,
+    "recommendationservice": 0.16666666666666663
+  },
+  "n_scored": 3
+}

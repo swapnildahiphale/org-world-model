@@ -1,0 +1,5 @@
+service ProductCatalogService {
+  rpc ListProducts(Empty) returns (ListProductsResponse) {}
+  rpc GetProduct(GetProductRequest) returns (Product) {}
+  rpc SearchProducts(SearchProductsRequest) returns (SearchProductsResponse) {}
+}

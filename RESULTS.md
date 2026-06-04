@@ -1,0 +1,103 @@
+# Live cluster result — does the thesis hold?
+
+**Claim under test:** a causal graph that *deepens from experience* predicts a code change's
+blast radius better than a stateless LLM — by learning a runtime coupling it was never given,
+and reporting calibrated confidence.
+
+**Verdict: yes, on cluster-measured ground truth, against real Opus.** All four pre-registered
+win conditions passed.
+
+```
+[PASS] engine_beats_baselines
+[PASS] engine_deepens
+[PASS] ablation_flat
+[PASS] state_amplifies
+```
+
+---
+
+## What was actually run (not a stub, not a fixture)
+
+- **System under test:** Google's Online Boutique (12 microservices) deployed to an isolated
+  namespace on a real EKS cluster, with a load generator driving
+  live browse/cart/checkout traffic.
+- **Ground truth was MEASURED, not authored.** We injected the hidden coupling for real —
+  `kubectl set env deploy/productcatalogservice EXTRA_LATENCY=3s` — and read the per-service p95
+  latency from distributed traces (Tempo metrics-generator, `quantile_over_time(duration,.95) by
+  service`) before vs. after. The fault was then reverted.
+
+  | service | baseline p95 | under EXTRA_LATENCY=3s | degraded? |
+  |---|---:|---:|---|
+  | frontend | 20.7 ms | **3568 ms** | ✅ |
+  | recommendationservice | 2.3 ms | **2410 ms** | ✅ |
+  | productcatalogservice | 0.1 ms | 2982 ms | (fault origin, excluded) |
+  | checkoutservice | 10.7 ms | 10.4 ms | — |
+  | currency / payment / email | flat | flat | — |
+
+  **Measured blast set D = {frontend, recommendationservice}.** `checkoutservice` was *checked,
+  not assumed* — it stayed flat, because the heavy productcatalog traffic flows through
+  frontend's browse path, not checkout. This is the real coupling structure of the system.
+
+- **The LLM opponents are real Opus** (`claude-opus-4-8`), at n=5 self-consistency sampling
+  (confidence = agreement frequency over 5 samples, not a verbalized "I'm 80% sure"). Run via the
+  Claude Code subscription — no API key consumed.
+- **Static parse is faithful.** The graph is seeded from the real Online Boutique k8s manifest
+  (32 nodes). `EXTRA_LATENCY` is declared in its OFF state (`"0s"`) exactly as the native
+  `DISABLE_PROFILER` knob is — so the parser emits `productcatalogservice::EXTRA_LATENCY` as a
+  genuine, inert, *unconnected* config node. The parser cannot know it couples to anything; that
+  downstream blast is the hidden edge the engine has to **learn**.
+
+## The result — HIDDEN stratum (the only headline; Rule 1)
+
+Brier score, lower is better:
+
+| predictor | HIDDEN Brier | reading |
+|---|---:|---|
+| **OWM engine** (after learning 1 incident) | **0.013** | best — learns + calibrates the coupling |
+| Opus + RAG (handed the incident history) | 0.027 | retrieval helps a lot, but still ~2× the engine's loss |
+| OWM engine (before learning) | 0.083 | ties BFS — *no better than topology until it learns* |
+| BFS topology walk | 0.083 | |
+| stateless Opus (no incident memory) | 0.127 | worst — cannot predict a non-topological coupling |
+
+**Deepening:** engine 0.083 → **0.013** after observing one incident.
+**Ablation (learning disabled):** 0.083 → 0.083, flat — proving the gain is the *learning*, not
+the seed graph or the propagation math.
+**State contrast** (state-conditioned prediction): under a saturated `s_t`, predicted blast
+amplifies on exactly the coupled services — recommendationservice +0.167, frontend +0.125.
+
+## What this does and does not show
+
+**Does:**
+- Even Opus *with retrieval over the exact incident* (0.027) does not match the deepened graph
+  (0.013). Stateless Opus (0.127) is far behind. The win is real and it is on a coupling that is
+  invisible to static structure.
+- The advantage is entirely attributable to **learning**: pre-learning the engine is no better
+  than a dumb BFS walk (both 0.083), and the learning-disabled ablation never improves. This is
+  the "world model that *deepens*" vs. "stateless decoder" distinction, made falsifiable.
+- The ground truth is measured from the running system, so this is not us grading our own
+  homework — the coupling and its blast were discovered empirically (and one expected member,
+  checkoutservice, was empirically *excluded*).
+
+**Does not (honest limits — these are Week-2):**
+- **Small sample.** One hidden coupling, 3 scored scenarios (1 hidden-transfer, 1 negative, 1
+  given). This demonstrates the *mechanism* convincingly; it is not yet a k-fold result over many
+  hidden edges with bootstrapped confidence intervals.
+- **Partial trace coverage.** adservice/cartservice/shippingservice didn't surface under their own
+  `service.name` (runtime auto-instrumentation didn't honor `OTEL_SERVICE_NAME`). They sit off the
+  productcatalog call path, so they're not in the blast radius regardless — but a fuller study
+  would instrument them.
+- **No abstention / risk–coverage yet.** Calibration is shown via the deepening curve and the
+  reliability plot (`docs/reliability.png`), not yet an abstention policy.
+
+## Reproduce
+
+```
+# (cluster + Online Boutique deployed, EXTRA_LATENCY measured -> D)
+.venv/bin/python -m scripts.live_run \
+   --degraded "frontend,recommendationservice" \
+   --repo-manifest data/online_boutique/repo/release/kubernetes-manifests.yaml \
+   --provider claude-code --self-consistency-n 5 --out results_live
+.venv/bin/python -m scripts.check_wins results_live/results.json
+```
+
+Committed copy: raw output `docs/results.json`, calibration plot `docs/reliability.png` (regenerate into `results_live/` with the command above).

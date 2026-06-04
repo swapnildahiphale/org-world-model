@@ -1,0 +1,6 @@
+[
+  {"scenario_id": "given-pc-handler", "stratum": "given",
+   "touched_services": ["productcatalogservice"], "s_t": "healthy"},
+  {"scenario_id": "hidden-extra-latency", "stratum": "hidden",
+   "touched_configs": ["productcatalogservice::EXTRA_LATENCY"], "s_t": "healthy"}
+]

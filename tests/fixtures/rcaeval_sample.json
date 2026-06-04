@@ -1,0 +1,6 @@
+[
+  {"case_id": "OB-productcatalog-latency", "stratum": "hidden",
+   "impacted_services": ["frontend", "recommendationservice"]},
+  {"case_id": "OB-cartservice-cpu", "stratum": "hidden",
+   "impacted_services": ["frontend", "checkoutservice"]}
+]

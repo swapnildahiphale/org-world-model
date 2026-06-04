@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.env
+.DS_Store
+*.png
+!docs/*.png
+data/online_boutique/repo/
+.ipynb_checkpoints/
+results/
+
+results_live/
+
+# internal design docs — kept locally for reference, not published
+docs/superpowers/
+# live-run generated ground truth (regenerate via `python -m scripts.live_run`)
+data/groundtruth/*_live.json

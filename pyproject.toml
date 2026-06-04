@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "org-world-model"
+version = "0.1.0"
+description = "A causal world model that learns a system's blast radius and beats a stateless LLM at predicting it."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Swapnil Dahiphale" }]
+keywords = ["causal-inference", "world-model", "llm", "observability", "blast-radius", "microservices"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "networkx>=3.2",
+  "numpy>=1.26",
+  "matplotlib>=3.8",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.39", "openai>=1.40"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+owm-run = "scripts.run:main"
+
+[tool.setuptools]
+packages = ["owm", "groundtruth", "scripts"]

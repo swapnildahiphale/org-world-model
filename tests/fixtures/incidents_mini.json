@@ -1,0 +1,4 @@
+[
+  {"origin": "productcatalogservice::EXTRA_LATENCY",
+   "impacted": ["frontend", "recommendationservice"], "scenario_id": "teach-latency-1"}
+]

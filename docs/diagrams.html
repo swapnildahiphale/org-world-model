@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Org World Model · architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#f8fafc; --paper:#ffffff; --line:rgba(148,163,184,0.26); --ink:#172033;
+    --muted:#64748b; --accent:#0f766e; --accent-bright:#10b981; --amber:#b45309;
+    --shadow:0 22px 55px -28px rgba(15,23,42,0.35);
+    --sans:"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+    padding:40px 28px 80px; }
+  .wrap { max-width:1100px; margin:0 auto; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:0.16em;
+    text-transform:uppercase; color:var(--accent); }
+  h1 { font-size:34px; letter-spacing:-0.02em; margin:6px 0 4px; }
+  .sub { color:var(--muted); font-size:14px; margin-bottom:8px; }
+  .legend { font-size:12.5px; color:var(--muted); font-family:var(--mono);
+    background:var(--paper); border:1px solid var(--line); border-radius:12px;
+    padding:10px 14px; display:inline-block; margin:14px 0 26px; }
+  .card { background:var(--paper); border:1px solid var(--line); border-radius:22px;
+    box-shadow:var(--shadow); padding:24px 26px 30px; margin-bottom:26px; }
+  .card h2 { font-size:17px; letter-spacing:-0.01em; margin:0 0 2px; }
+  .card .cap { color:var(--muted); font-size:12.5px; margin:0 0 16px; }
+  .mermaid { display:flex; justify-content:center; }
+  .num { font-family:var(--mono); color:var(--accent); font-size:12px; }
+  .plain { margin:18px 0 0; padding:14px 16px; background:var(--bg);
+    border:1px solid var(--line); border-left:3px solid var(--accent-bright);
+    border-radius:12px; font-size:13.5px; line-height:1.6; color:#334155; }
+  .plain b { color:var(--ink); }
+  .intro { background:var(--paper); border:1px solid var(--line); border-radius:22px;
+    box-shadow:var(--shadow); padding:24px 26px; margin-bottom:26px; }
+  .intro h2 { font-size:17px; margin:0 0 8px; letter-spacing:-0.01em; }
+  .intro p { font-size:13.5px; line-height:1.65; color:#334155; margin:0 0 14px; }
+  .vocab { list-style:none; margin:0; padding:0; display:grid; gap:9px; }
+  .vocab li { font-size:13px; line-height:1.55; color:#334155; }
+  .vocab b { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Org World Model</div>
+  <h1>System &amp; workflow diagrams</h1>
+  <div class="sub">Source: <span style="font-family:var(--mono)">docs/architecture-diagrams.md</span></div>
+  <div class="legend">— solid = <b>GIVEN</b> (static-parseable, seeded) &nbsp;·&nbsp; - - - dashed = <b>HIDDEN</b> (learned from incidents)</div>
+
+  <div class="intro">
+    <h2>What this is &amp; why</h2>
+    <p>Today's AI coding tools are effectively <i>stateless decoders</i> — they pattern-match text but have <b>no model of your actual running system</b>, so they can't reliably answer <i>"what breaks if I change this?"</i> and don't learn from your incidents. This project builds a small <b>causal world model</b> that does, and shows — on a real microservice app (Online Boutique) — that a graph-based causal model beats a plain LLM at predicting the consequences of a code change, <b>and</b> gets smarter from each incident.</p>
+    <h2 style="margin-top:6px;">Vocabulary</h2>
+    <ul class="vocab">
+      <li><b>OB = Online Boutique</b> — Google's open-source microservices demo: a toy e-commerce site, 11 services + a Redis cache + a load generator. Our stand-in "real system" to model.</li>
+      <li><b>Blast radius</b> — when you ship a change to service S, <i>which other services break/degrade</i> as a consequence. "What breaks if you touch X."</li>
+      <li><b>The "join"</b> — stitching three normally-separate things into one graph: code (who-calls-what), runtime topology (which service calls which), incident history (what actually broke). Nobody fuses these — the novel bit.</li>
+      <li><b>GIVEN vs HIDDEN</b> — GIVEN = connections any static tool reads from the code. HIDDEN = real couplings the code doesn't reveal (shared Redis contention; a config flag that slows another service). <b>Honesty rule:</b> we only grade the model on HIDDEN couplings it had to <i>learn</i>.</li>
+      <li><b>Calibration</b> — when it says "70% chance this breaks," does it break ~70% of the time? LLMs are confidently wrong; a good model's confidence matches reality. Headline #1.</li>
+      <li><b>Deepening</b> — the model permanently improves from each incident; the LLM doesn't retain that across questions. Headline #2.</li>
+      <li><b>s_t (state)</b> — the cluster's current condition (healthy vs. overloaded). The same change can have a different blast radius depending on state — a world model captures that; a static graph or stateless LLM can't. The "money shot."</li>
+      <li><b>noisy-OR</b> — simple math to combine probabilities when something can break via multiple paths. The propagation rule.</li>
+      <li><b>Beta update / surprise-gated</b> — nudge a probability toward what you observe, incident by incident; learn only from events that <i>surprised</i> the model.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">01</span> &nbsp;System architecture / components</h2>
+    <p class="cap">The <span style="font-family:var(--mono)">owm/</span> modules and how data moves between them. The graph is the model; the LLM is only a baseline.</p>
+    <pre class="mermaid">
+flowchart TB
+  subgraph IN["Inputs"]
+    repo["OB repo"]
+    man["k8s manifests / topology"]
+    cl[("live cluster")]
+    rca[("RCAEval OB dataset")]
+  end
+  subgraph CORE["Core engine — the world model"]
+    cg["codegraph.py<br/>static parse → files,<br/>file→service, file→call-site"]
+    topo["topology.py<br/>seed service→service<br/>GIVEN edges"]
+    gr["graph.py<br/>typed causal graph<br/>+ given/learned provenance"]
+    prop["propagate.py<br/>do(change, s_t)<br/>noisy-OR blast radius"]
+    lrn["learn.py<br/>Beta update +<br/>surprise-gated hidden edges"]
+  end
+  subgraph EVAL["Evaluation harness"]
+    sc["scenarios.py<br/>GIVEN/HIDDEN ·<br/>teach/transfer/negative"]
+    ctx["context.py<br/>context_pack() —<br/>symmetric info"]
+    bl["baseline_llm.py<br/>LLM · LLM+RAG · BFS"]
+    ev["eval.py<br/>calibration · deepening<br/>· risk-coverage"]
+  end
+  subgraph GT["Ground truth"]
+    gtm["groundtruth/<br/>injection + journey-probe<br/>+ RCAEval loader"]
+  end
+  subgraph OUT["Deliverable"]
+    rd["run.py"]
+    web["web/ dashboard view"]
+  end
+  repo --> cg
+  man --> topo
+  cg --> gr
+  topo --> gr
+  gr --> prop
+  sc --> ctx
+  ctx --> prop
+  ctx --> bl
+  cl --> gtm
+  rca --> gtm
+  gtm --> lrn
+  lrn --> gr
+  prop --> ev
+  bl --> ev
+  gtm --> ev
+  ev --> rd
+  rd --> web
+    </pre>
+    <p class="plain"><b>In plain English:</b> the boxes are the code modules we'll write. Read left-to-right by <i>layer</i>: <b>Inputs</b> (the OB repo, its k8s manifests, your live cluster, the RCAEval fault dataset) feed the <b>Core engine</b> (parses the code, builds the seed graph, answers <span style="font-family:var(--mono)">do(change)</span> predictions); the <b>Evaluation harness</b> runs the same questions through both our engine and the LLM baselines and scores them against <b>Ground truth</b>; results flow to the <b>Deliverable</b> (a demo runner + the web view). One-liner: <i>inputs → build the model → predict → score engine vs. LLM → show it.</i></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">02</span> &nbsp;The join graph schema</h2>
+    <p class="cap">The world model itself: code ↔ services ↔ incidents in one typed graph. Dashed = the hidden couplings to learn.</p>
+    <pre class="mermaid">
+flowchart LR
+  commit(["commit"]) -->|touches| file(["file"])
+  file -->|owned-by| svc(["service"])
+  svc -->|"calls (GIVEN)"| svc2(["service"])
+  svc -->|"depends_on (GIVEN)"| ds[("datastore")]
+  inc{{"incident"}} -->|caused| svc2
+  inc -->|root_cause| commit
+  svc -.->|"HIDDEN: config / resource coupling<br/>learned from incidents"| svc3(["service"])
+    </pre>
+    <p class="plain"><b>In plain English:</b> this is the <i>shape of the world model itself</i> — the data structure. A <span style="font-family:var(--mono)">commit</span> <b>touches</b> files, a file is <b>owned by</b> a service, services <b>call</b> other services (and <b>depend on</b> a datastore), and an <b>incident caused</b> damage to a service and traces to a root-cause commit. <b>Solid</b> arrows are GIVEN (readable from code); the <b>dashed</b> arrow is a HIDDEN coupling the engine must <i>learn</i>. One-liner: <i>code, runtime, and incidents in one connected graph.</i></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">03</span> &nbsp;Prediction data-flow</h2>
+    <p class="cap">A code change + cluster state flows through the engine and the baselines on identical context; only the HIDDEN stratum is the headline.</p>
+    <pre class="mermaid">
+flowchart TB
+  change["code change (diff)"] --> ctx["context_pack()<br/>topology + diff + incident logs"]
+  st["cluster state s_t<br/>healthy | saturated"] --> eng
+  ctx --> eng["ENGINE: do(change, s_t)<br/>files→call-sites→edges→noisy-OR"]
+  ctx --> b1["stateless LLM"]
+  ctx --> b2["LLM + RAG"]
+  ctx --> b3["topology BFS"]
+  eng --> p0["ranked P(blast radius)"]
+  b1 --> p1["ranked services + confidence"]
+  b2 --> p2["ranked + confidence"]
+  b3 --> p3["reachable set"]
+  p0 --> ev["eval vs ground truth<br/>HIDDEN stratum = headline"]
+  p1 --> ev
+  p2 --> ev
+  p3 --> ev
+  ev --> o1["reliability + Brier (H1)"]
+  ev --> o2["deepening curve (H2)"]
+  ev --> o3["risk-coverage (abstention)"]
+    </pre>
+    <p class="plain"><b>In plain English:</b> how a <i>single</i> prediction happens. A code change (+ the cluster state <span style="font-family:var(--mono)">s_t</span>) goes into our <b>engine</b>; the <b>exact same information, as text</b>, goes into the <b>LLM baselines</b> (plain LLM, LLM+retrieval, and a dumb graph-walk). Each produces a ranked "here's what'll break" list. <b>Eval</b> scores them all against ground truth — <i>but only the HIDDEN cases are the headline</i> — and emits the three result types: calibration, the deepening curve, and abstention. One-liner: <i>same question to engine and LLM, fair fight, judged on the hard cases.</i></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">04</span> &nbsp;The learning / deepening loop</h2>
+    <p class="cap">The H2 story: a surprising incident adds a hidden edge or updates a posterior; we re-score on a held-out related change.</p>
+    <pre class="mermaid">
+flowchart LR
+  inc["incident I_i<br/>observed blast radius"] --> q{"impact on a service<br/>graph gave ≈0 prob?"}
+  q -->|"yes — SURPRISE"| add["add HIDDEN edge<br/>config / resource coupling"]
+  q -->|no| upd["Beta posterior update<br/>on existing edges"]
+  add --> upd
+  upd --> g[("deepened graph")]
+  g --> rt["re-predict on HELD-OUT<br/>TRANSFER change"]
+  rt --> cv["deepening-curve point<br/>AUPRC↑ = generalization"]
+    </pre>
+    <p class="plain"><b>In plain English:</b> how the model gets smarter. An incident arrives. <b>Did it surprise the model</b> (break something it thought was safe)? If yes → it <b>adds a hidden edge</b> (it just discovered a coupling). If no → it just <b>updates the probability</b> on an edge it already knew. Then — crucially — we <b>re-test on a <i>different but related</i> change</b> it hasn't seen, to prove it learned the <i>general lesson</i>, not memorized one incident. That after-learning score is a point on the deepening curve. One-liner: <i>incident → learn the coupling → prove it generalizes.</i></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">05</span> &nbsp;The evaluation protocol</h2>
+    <p class="cap">How we neutralize "you gave it the answer": provenance split + teach/transfer/negative roles per hidden edge.</p>
+    <pre class="mermaid">
+flowchart TB
+  scen["scenarios"] --> strat{"edge provenance"}
+  strat -->|GIVEN-only| floor["sanity floor<br/>(not headline)"]
+  strat -->|HIDDEN-dependent| head["HEADLINE"]
+  head --> role{"role per hidden edge H"}
+  role -->|TEACH| teach["engine learns H<br/>(not scored)"]
+  role -->|"TRANSFER (held-out)"| tr["H2: generalization"]
+  role -->|NEGATIVE| neg["specificity:<br/>don't over-fire"]
+  tr --> m1["deepening curve<br/>k-fold · bootstrap CI"]
+  head --> m2["H1: reliability + Brier"]
+  head --> m3["abstention: risk-coverage / AURC"]
+    </pre>
+    <p class="plain"><b>In plain English:</b> how we stay honest (mostly guardrails). Split every test scenario by <b>GIVEN vs HIDDEN</b> — only HIDDEN is the headline. For each hidden coupling, changes get one of three <b>roles</b>: <b>TEACH</b> (the model may learn from these), <b>TRANSFER</b> (held-out — the <i>real</i> test of whether it learned), and <b>NEGATIVE</b> (look-alike changes that should <i>not</i> trigger it, proving it's not just over-reacting). Those feed the deepening curve, the calibration result, and the abstention ("knows when to ask") result. One-liner: <i>judge only on what it had to learn, and only on examples it never saw.</i></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">06</span> &nbsp;Signal ingestion layer (extensible)</h2>
+    <p class="cap">Many signal sources feed the model through adapters; only outcome signals grant causal weight. Green = built in the demo · amber = illustrative stub · grey = future.</p>
+    <pre class="mermaid">
+flowchart LR
+  subgraph SRC["Signal sources"]
+    direction TB
+    code["code graph<br/>(static parse)"]
+    topo["k8s topology<br/>/ manifests"]
+    inc["incidents / fault<br/>injection / SLO"]
+    dec["Slack / ADRs /<br/>review notes"]
+    jira["Jira / CODEOWNERS<br/>/ on-call"]
+    pm["postmortems /<br/>product specs"]
+  end
+  code --> A1["adapter"]
+  topo --> A1
+  inc --> A2["adapter"]
+  dec -.-> A3["adapter"]
+  jira -.-> A3
+  pm -.-> A3
+  A1 -->|propose| EP["edge-proposal<br/>evidence · confidence<br/>provenance · ts"]
+  A3 -.->|propose only| EP
+  A2 -->|decide| EO["edge-outcome<br/>→ Beta update"]
+  A3 -.-> NA["node-annotation<br/>why / owner / trap"]
+  EP --> G[("causal graph")]
+  EO -->|earns / revokes weight| G
+  NA --> G
+  classDef impl fill:#d1fae5,stroke:#047857;
+  classDef stub fill:#fef3c7,stroke:#b45309;
+  classDef future fill:#f1f5f9,stroke:#94a3b8,color:#64748b;
+  class code,topo,inc,A1,A2,EP,EO impl;
+  class dec,A3 stub;
+  class jira,pm,NA future;
+    </pre>
+    <p class="plain"><b>In plain English:</b> many signal sources feed the model through adapters. Structural and decision signals can <i>propose</i> edges, but <b>only outcome signals (incidents/faults) grant causal weight</b> — that rule keeps it a world model, not retrieval-over-Slack. Colors: green = built in the demo, amber = illustrative stub, grey = future. One-liner: <i>decision-signals propose, outcomes decide.</i></p>
+  </div>
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: '"Geist", sans-serif',
+      primaryColor: '#ffffff',
+      primaryBorderColor: '#0f766e',
+      primaryTextColor: '#172033',
+      lineColor: '#64748b',
+      tertiaryColor: '#f1f5f9',
+      clusterBkg: '#f8fafc',
+      clusterBorder: 'rgba(148,163,184,0.4)'
+    }
+  });
+</script>
+</body>
+</html>
