@@ -42,9 +42,11 @@ win conditions passed.
   (confidence = agreement frequency over 5 samples, not a verbalized "I'm 80% sure"). Run via the
   Claude Code subscription — no API key consumed.
 - **Static parse is faithful.** The graph is seeded from the real Online Boutique k8s manifest
-  (32 nodes). `EXTRA_LATENCY` is declared in its OFF state (`"0s"`) exactly as the native
-  `DISABLE_PROFILER` knob is — so the parser emits `productcatalogservice::EXTRA_LATENCY` as a
-  genuine, inert, *unconnected* config node. The parser cannot know it couples to anything; that
+  (32 nodes). `EXTRA_LATENCY` is a real runtime knob of productcatalogservice (read by its server,
+  set via the Helm chart), but the upstream release manifest doesn't pin it — so the harness
+  declares it in its OFF state (`"0s"`) before parsing, the same inert form the native
+  `DISABLE_PROFILER` knob already has. The parser then emits `productcatalogservice::EXTRA_LATENCY`
+  as a genuine, inert, *unconnected* config node; it cannot know the node couples to anything. That
   downstream blast is the hidden edge the engine has to **learn**.
 
 ## The result — HIDDEN stratum (the only headline; Rule 1)
