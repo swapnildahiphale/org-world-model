@@ -190,13 +190,13 @@ store, with a hard line between the **agent-agnostic engine** and the
           │ BATCH           │ BATCH           │ EVENT            │ (later)
           ▼                 ▼                 ▼                  ▼
  ┌─────────────────────────────────────┐  ┌────────────────────────────────┐
- │ ① INGESTION WORKER (propose host)   │  │ ⑤ OUTCOME RECEIVER (decide host)│
+ │ ④ INGESTION WORKER (propose host)   │  │ ⑤ OUTCOME RECEIVER (decide host)│
  │   code-parse · topology · config    │  │   trigger → measure blast set   │
  └──────────────────┬──────────────────┘  └───────────────┬────────────────┘
         propose      │                         outcome      │
         structure    ▼                         events       ▼
  ┌─────────────────────────────────────┐        ┌──────────────────────────┐
- │ ② MODEL STATE — POSTGRES (+ queue)  │◄───────┤ ⑥ LEARNING WORKER        │
+ │ ③ MODEL STATE — POSTGRES (+ queue)  │◄───────┤ ⑥ LEARNING WORKER        │
  │   nodes · edges (GIVEN/HIDDEN) ·    │ grant/ │   Beta update +          │
  │   Beta params · incident log ·      │ revoke │   surprise-gated HIDDEN   │
  │   ownership idx · model versions    ├───────►│   edges (continuous)     │
@@ -204,12 +204,12 @@ store, with a hard line between the **agent-agnostic engine** and the
                     │ load graph → memory
                     ▼
  ┌─────────────────────────────────────┐
- │ ③ INFERENCE ENGINE [reuse]          │   do(change, state) → noisy-OR,
+ │ ② READ SERVICE · inference engine   │   do(change, state) → noisy-OR,
  │   in-mem graph · state-gated        │   state-conditioned, calibrated
  └──────────────────┬──────────────────┘
                     ▼
  ┌─────────────────────────────────────┐   ┌──────────────┐  ┌──────────┐
- │ ④ QUERY / GROUNDING API [new]       │──►│ MCP server   │  │ Inspect  │
+ │ ② READ SERVICE · grounding API      │──►│ ① MCP server │  │ Inspect  │
  │   assembles the "grounding pack"    │   │ ~3-4 tools   │  │ UI       │
  └─────────────────────────────────────┘   └──────┬───────┘  └──────────┘
                                                    │ MCP
@@ -226,31 +226,34 @@ store, with a hard line between the **agent-agnostic engine** and the
 Legend: `[reuse]` = validated spike code promoted to a service · `[new]` =
 productization work · later-phase items are named inline.
 
-### The six components
-1. **Ingestion / adapter layer** *(new wrappers + `codegraph`/`topology` reuse)* —
-   structure adapters run **batch**; the code-parse adapter collapses repos *up*
-   to a **file→service ownership index + config-knob inventory** (no symbol
-   graph); the topology adapter seeds GIVEN edges. The outcome adapter runs
-   **event-driven** (trigger → measure). All emit a normalized envelope.
-2. **Model state — Postgres** *(new)* — system of record for nodes, edges (with
-   provenance), Beta params, the incident log, ownership index, and model
-   versions/snapshots. Closes the spike's "rebuilt each run" gap (§4).
-3. **Inference engine** *(reuse `propagate`/`engine`)* — loads the persisted graph
-   into memory, serves `do(change, state)`. Stateless compute → scales
-   horizontally.
-4. **Serving** *(new)* — the Query/Grounding API (assembles the pack), a tiny MCP
-   server over it, and a read-only inspection UI.
-5. **Learning service** *(reuse `learn`)* — consumes outcomes continuously; Beta
-   updates + surprise-gated HIDDEN-edge proposals; bumps the model version.
-6. **Offline eval harness** *(reuse `eval` + baselines)* — out of the live path;
-   the honesty gate + regression detector in CI.
+### The seven components (deployables ①–⑦ — detailed in §9)
+- **① MCP server** *(new)* — a thin adapter over the read service exposing ~3-4
+  trigger-rich tools; runs local-stdio or remote-HTTP.
+- **② Read service** *(new wrapper + `propagate`/`engine` reuse)* — the
+  Query/Grounding API with the **embedded inference engine**: loads the persisted
+  graph into memory and serves `do(change, state)` → the grounding pack. Stateless
+  compute → scales horizontally.
+- **③ Model state — Postgres (+ queue)** *(new)* — system of record for nodes,
+  edges (with provenance), Beta params, the incident log, ownership index, and
+  model versions/snapshots. Closes the spike's "rebuilt each run" gap (§4).
+- **④ Ingestion worker** *(new wrappers + `codegraph`/`topology` reuse)* — hosts
+  the **batch** structure adapters; the code-parse adapter collapses repos *up* to
+  a **file→service ownership index + config-knob inventory** (no symbol graph);
+  the topology adapter seeds GIVEN edges. All emit a normalized envelope.
+- **⑤ Outcome receiver** *(new)* — hosts the **event-driven** outcome adapters
+  (trigger → measure the blast set from traces); emits outcome events.
+- **⑥ Learning worker** *(reuse `learn`)* — consumes outcomes continuously; Beta
+  updates + surprise-gated HIDDEN-edge proposals; bumps the model version.
+- **⑦ Offline eval harness** *(reuse `eval` + baselines)* — out of the live path;
+  the honesty gate + regression detector in CI.
 
-Plus the **integration kit** (shipped `AGENTS.md` + always-on rules; CC hooks
-deferred) — artifacts, not a running service.
+Plus a read-only **inspection UI** (unnumbered adjunct over ②) and the
+**integration kit** (shipped `AGENTS.md` + always-on rules; CC hooks deferred) —
+artifacts, not running core services.
 
 ---
 
-## 4. Data model & storage (component ②)
+## 4. Data model & storage (component ③)
 
 ### The principle: event-sourced truth
 > The **durable** source of truth is **(a) GIVEN structure** + **(b) the
@@ -390,7 +393,7 @@ invocation models):
                  │
       ┌──────────┴────────────────────────────────────┐
       ▼                                                ▼
-  ① INGESTION WORKER                            ⑤ OUTCOME RECEIVER
+  ④ INGESTION WORKER                            ⑤ OUTCOME RECEIVER
    batch · pull · scheduled                      event · push · webhook
    ("signals PROPOSE structure")                 ("outcomes DECIDE weight")
    plugins:                                       plugins:
@@ -648,7 +651,7 @@ envelopes and MCP `outputSchema`), official Python MCP SDK, Postgres
    `AGENTS.md`/rules kit, it calls `owm_ground(change, state)`.
 2. MCP server ① → Read service ②. The Query API **localizes** the change via the
    ownership index → `productcatalogservice` node.
-3. Embedded engine ③ runs `do(change, state)` over the in-memory projection →
+3. The embedded engine (within ②) runs `do(change, state)` over the in-memory →
    ranked calibrated blast radius; the API assembles the grounding pack (couplings,
    ownership, related incidents, abstain flag, optional narration).
 4. Pack returned to the agent; **written to the prediction log** with the live
@@ -674,7 +677,7 @@ envelopes and MCP `outputSchema`), official Python MCP SDK, Postgres
 2. The code-parse adapter re-parses registered service repos → updates the
    ownership index + config-knob inventory; the topology adapter refreshes GIVEN
    edges from manifests + traces.
-3. Adapters emit **propose** envelopes; the model state ② is reconciled
+3. Adapters emit **propose** envelopes; the model state ③ is reconciled
    idempotently (GIVEN structure updated; learned weights untouched). Structure
    changes can trigger **forgetting** (a removed substrate → dormant edge) in a
    later phase.
