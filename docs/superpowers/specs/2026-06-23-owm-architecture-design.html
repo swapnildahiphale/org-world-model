@@ -1,0 +1,1222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Org World Model (OWM) · Architecture & End-to-End Design</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Geist', 'system-ui', 'sans-serif'],
+          mono: ['"Geist Mono"', 'ui-monospace', 'monospace'],
+        },
+        colors: {
+          accent: {
+            DEFAULT: 'rgb(16 185 129)',
+            soft:    'rgb(209 250 229)',
+            deep:    'rgb(5 150 105)',
+            900:     'rgb(6 95 70)',
+          },
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root {
+    --bg: #f9fafb;
+    --ink: rgb(15 23 42);
+    --ink-2: rgb(71 85 105);
+    --ink-3: rgb(100 116 139);
+    --ink-4: rgb(148 163 184);
+    --line: rgb(226 232 240 / 0.7);
+    --line-soft: rgb(241 245 249);
+    --card-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.05);
+    --accent: 16 185 129;
+    --accent-soft: 209 250 229;
+    --accent-deep: 5 150 105;
+    --accent-900: 6 95 70;
+    --amber: 217 119 6;
+    --rose: 225 29 72;
+    --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  html, body { background: var(--bg); }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Geist', system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ===== Tokens ===== */
+  .accent-bg     { background-color: rgb(var(--accent)); }
+  .accent-soft-bg{ background-color: rgb(var(--accent-soft) / 0.55); }
+  .accent-deep-bg{ background-color: rgb(var(--accent-deep)); }
+  .accent-text   { color: rgb(var(--accent-deep)); }
+  .accent-text-strong { color: rgb(var(--accent-900)); }
+  .accent-border { border-color: rgb(var(--accent) / 0.35); }
+  .amber-text    { color: rgb(180 83 9); }
+  .amber-soft-bg { background-color: rgb(254 243 199 / 0.55); }
+  .rose-text     { color: rgb(190 18 60); }
+  .rose-soft-bg  { background-color: rgb(255 228 230 / 0.55); }
+
+  .card {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 2.5rem;
+    box-shadow: var(--card-shadow);
+  }
+  .panel {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 1.25rem;
+  }
+  .glass {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.55);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 24px 60px -20px rgba(15, 23, 42, 0.18);
+  }
+
+  /* ===== Animations ===== */
+  @keyframes livepulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(var(--accent) / 0.45); }
+    50%      { box-shadow: 0 0 0 6px rgb(var(--accent) / 0); }
+  }
+  .live-dot {
+    background-color: rgb(var(--accent));
+    animation: livepulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes breath {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50%      { opacity: 1; transform: scale(1.08); }
+  }
+  .breath { animation: breath 4s ease-in-out infinite; transform-origin: center; }
+
+  @keyframes overshoot-in {
+    0%   { opacity: 0; transform: translateY(8px) scale(0.96); }
+    60%  { opacity: 1; transform: translateY(-2px) scale(1.02); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .pop-in { animation: overshoot-in 0.6s var(--spring) both; }
+
+  @keyframes stagger-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .stagger > * {
+    opacity: 0;
+    animation: stagger-rise 0.55s var(--ease-out-soft) both;
+    animation-delay: calc(var(--i, 0) * 60ms);
+  }
+
+  /* ===== Sidebar item ===== */
+  .nav-item {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 12px;
+    color: var(--ink-2);
+    transition: background-color 0.18s var(--ease-out-soft), color 0.18s var(--ease-out-soft);
+    cursor: pointer;
+    position: relative;
+    text-decoration: none;
+    font-size: 13.5px;
+  }
+  .nav-item:hover { background-color: rgb(241 245 249 / 0.8); color: var(--ink); }
+  .nav-item.active {
+    background-color: rgb(var(--accent-soft) / 0.55);
+    color: rgb(var(--accent-deep));
+  }
+  .nav-item.active::before {
+    content: '';
+    position: absolute; left: -10px; top: 50%;
+    transform: translateY(-50%);
+    width: 3px; height: 18px; border-radius: 2px;
+    background: rgb(var(--accent));
+  }
+  .nav-item .num { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; }
+
+  /* ===== Buttons ===== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    height: 36px; padding: 0 14px;
+    border-radius: 9999px;
+    font-size: 13.5px; font-weight: 500;
+    letter-spacing: -0.005em;
+    transition: transform 0.12s var(--ease-out-soft), background-color 0.18s, box-shadow 0.18s;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-soft     { background: rgb(var(--accent-soft) / 0.5); color: rgb(var(--accent-deep)); }
+  .btn-soft:hover{ background: rgb(var(--accent-soft) / 0.8); }
+  .btn-secondary{ background: white; color: var(--ink); border: 1px solid var(--line); }
+  .btn-secondary:hover { background: rgb(248 250 252); }
+
+  /* ===== Chips ===== */
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 11px; font-weight: 500;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .chip-neutral { background: rgb(241 245 249); color: rgb(71 85 105); }
+  .chip-accent  { background: rgb(var(--accent-soft) / 0.6); color: rgb(var(--accent-deep)); }
+  .chip-amber   { background: rgb(254 243 199 / 0.7); color: rgb(180 83 9); }
+  .chip-rose    { background: rgb(255 228 230 / 0.7); color: rgb(190 18 60); }
+  .chip-outline { background: transparent; color: var(--ink-2); border: 1px solid var(--line); }
+
+  /* Mono numeric */
+  .num { font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  /* inline code */
+  code {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.86em;
+    background: rgb(241 245 249 / 0.9);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 6px;
+    color: rgb(var(--accent-900));
+    word-break: break-word;
+  }
+
+  /* prose body */
+  .prose p { color: var(--ink-2); line-height: 1.72; font-size: 15px; max-width: 72ch; }
+  .prose p strong, .prose li strong { color: var(--ink); font-weight: 600; }
+  .prose ul { margin: 0.75rem 0; padding-left: 1.25rem; list-style: disc; }
+  .prose ul li { color: var(--ink-2); line-height: 1.7; font-size: 14.5px; margin: 0.3rem 0; max-width: 72ch; }
+  .prose ol { margin: 0.75rem 0; padding-left: 1.25rem; list-style: decimal; }
+  .prose ol li { color: var(--ink-2); line-height: 1.7; font-size: 14.5px; margin: 0.3rem 0; max-width: 72ch; }
+  .prose a { color: rgb(var(--accent-deep)); }
+  .prose a:hover { text-decoration: underline; }
+
+  /* section heading */
+  .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--ink-4); }
+
+  /* diagram container */
+  .diagram-cap {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 12px; color: var(--ink-3);
+    border-bottom: 1px dashed var(--line);
+    padding-bottom: 10px; margin-bottom: 14px;
+  }
+  .mermaid { display: flex; justify-content: center; }
+
+  /* code block */
+  pre.code {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 12.6px; line-height: 1.65;
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-left: 3px solid rgb(var(--accent));
+    border-radius: 14px;
+    padding: 16px 18px; overflow: auto;
+    color: rgb(51 65 85);
+    white-space: pre;
+  }
+  pre.code .c { color: rgb(5 150 105); }
+  pre.code .k { color: rgb(180 83 9); font-weight: 500; }
+  pre.code .m { color: rgb(148 163 184); }
+  pre.code .s { color: rgb(2 132 199); }
+
+  /* callouts */
+  .call { border-radius: 16px; padding: 16px 20px; margin: 20px 0; border: 1px solid; display: flex; gap: 13px; align-items: flex-start; line-height: 1.6; font-size: 14.5px; }
+  .call .ic { font-size: 17px; line-height: 1.4; flex-shrink: 0; }
+  .call.warn   { background: rgb(254 243 199 / 0.45); border-color: rgb(217 119 6 / 0.3); color: rgb(146 64 14); }
+  .call.danger { background: rgb(255 228 230 / 0.5); border-color: rgb(225 29 72 / 0.3); color: rgb(159 18 57); }
+  .call.info   { background: rgb(var(--accent-soft) / 0.4); border-color: rgb(var(--accent) / 0.3); color: rgb(6 78 59); }
+  .call b { color: inherit; font-weight: 600; }
+  .call code { background: rgba(255,255,255,0.6); }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; }
+  thead tr { border-bottom: 1.5px solid var(--line); }
+  td { color: var(--ink-2); }
+  td code { font-size: 11.5px; }
+  td.num, th.num { text-align: right; }
+  tbody tr { transition: background-color 0.15s; }
+  tbody tr:hover { background: rgb(248 250 252 / 0.7); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.g { background: rgb(16 185 129); } .dot.a { background: rgb(217 119 6); } .dot.r { background: rgb(225 29 72); }
+
+  /* highlighted row (the money-shot result) */
+  tr.hi-row td { background: rgb(209 250 229 / 0.45); }
+  tr.hi-row:hover td { background: rgb(209 250 229 / 0.6); }
+
+  /* step list */
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 18px 0; }
+  ol.steps li { counter-increment: s; position: relative; padding: 12px 0 12px 48px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 0; top: 10px;
+    width: 30px; height: 30px; border-radius: 9px;
+    background: rgb(var(--accent-soft) / 0.5); border: 1px solid rgb(var(--accent) / 0.25);
+    color: rgb(var(--accent-deep)); font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12.5px;
+    display: grid; place-items: center;
+  }
+  .phase { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: rgb(var(--accent-deep)); margin: 28px 0 4px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .phase.danger { color: rgb(190 18 60); }
+
+  /* stat cards */
+  .stat { padding: 16px 18px; }
+  .stat h4 { margin: 0 0 6px; font-size: 11px; color: var(--ink-3); font-family: 'Geist Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat .big { font-size: 22px; color: var(--ink); font-weight: 600; letter-spacing: -0.01em; }
+
+  /* glossary */
+  .gloss-term { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13.5px; font-weight: 500; color: var(--ink); }
+  .gloss-def { color: var(--ink-2); font-size: 14px; line-height: 1.65; margin-top: 2px; }
+  .gloss-here { display: inline-flex; align-items: center; gap: 6px; }
+  .here-label {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px; border-radius: 9999px;
+    background: rgb(var(--accent-soft) / 0.6); color: rgb(var(--accent-deep));
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 10px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0;
+  }
+
+  /* scrollbar */
+  .panel-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: rgb(226 232 240 / 0.9); border-radius: 9999px; border: 2px solid var(--bg); }
+  .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+
+  h2.sec-h { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); margin: 0; }
+  h3.sub-h { font-size: 16px; font-weight: 600; color: var(--ink); margin: 26px 0 6px; }
+
+  /* mermaid wrap — horizontal scroll for wide diagrams */
+  .mmd-wrap { width: 100%; overflow-x: auto; }
+  .mmd-wrap::-webkit-scrollbar { height: 10px; }
+  .mmd-wrap::-webkit-scrollbar-thumb { background: rgb(226 232 240 / 0.9); border-radius: 9999px; border: 2px solid #fff; }
+  .mmd-wrap .mermaid svg { max-width: none; height: auto; }
+
+  /* legend pills */
+  .legend-pill { display:inline-flex; align-items:center; gap:7px; font-family:'Geist Mono',ui-monospace,monospace; font-size:11.5px; color:var(--ink-2); padding:5px 11px; border:1px solid var(--line); border-radius:9999px; background:#fff; }
+  .legend-pill .swatch { width:20px; height:3px; border-radius:2px; flex-shrink:0; }
+  .legend-pill .swatch.dot { width:9px; height:9px; border-radius:50%; }
+  .legend-pill .swatch.dash { background-image: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px); height: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live-dot, .breath, .pop-in, .stagger > * { animation: none; }
+  }
+</style>
+</head>
+<body class="min-h-[100dvh] antialiased">
+
+<div class="flex max-w-[1500px] mx-auto">
+
+  <!-- ===== Left sticky sidebar TOC ===== -->
+  <aside class="shrink-0 sticky top-0 h-[100dvh] overflow-y-auto panel-scroll py-8 px-4 border-r border-slate-200/60 bg-white/40 backdrop-blur-sm hidden lg:block" style="width:268px">
+    <div class="px-3 mb-1 flex items-baseline gap-2">
+      <span class="text-[15px] font-semibold tracking-tight text-slate-900">Org World Model<span class="accent-text"> ·</span></span>
+    </div>
+    <div class="px-3 mb-6 num text-[11px] text-slate-400">OWM · architecture &amp; design</div>
+
+    <nav class="space-y-1" id="toc">
+      <a href="#context"  class="nav-item"><span class="num text-slate-400">01</span> Context &amp; purpose</a>
+      <a href="#whatis"   class="nav-item"><span class="num text-slate-400">02</span> What OWM is / is not</a>
+      <a href="#arch"     class="nav-item"><span class="num accent-text">★</span> System architecture</a>
+      <a href="#data"     class="nav-item"><span class="num text-slate-400">04</span> Data model &amp; storage</a>
+      <a href="#schema"   class="nav-item"><span class="num text-slate-400">05</span> Schema evolution</a>
+      <a href="#ingest"   class="nav-item"><span class="num text-slate-400">06</span> Ingestion &amp; adapters</a>
+      <a href="#infer"    class="nav-item"><span class="num text-slate-400">07</span> Inference &amp; grounding</a>
+      <a href="#learn"    class="nav-item"><span class="num text-slate-400">08</span> Learning loop at scale</a>
+      <a href="#decomp"   class="nav-item"><span class="num text-slate-400">09</span> Service decomposition</a>
+      <a href="#flows"    class="nav-item"><span class="num text-slate-400">10</span> End-to-end flows</a>
+      <a href="#stack"    class="nav-item"><span class="num text-slate-400">11</span> Tech stack</a>
+      <a href="#roadmap"  class="nav-item"><span class="num text-slate-400">12</span> Phased roadmap</a>
+      <a href="#decisions" class="nav-item"><span class="num text-slate-400">13</span> Decision log</a>
+      <a href="#gloss"    class="nav-item"><span class="num text-slate-400">14</span> Glossary</a>
+    </nav>
+
+    <div class="mt-8 pt-6 border-t border-slate-200/60 px-3">
+      <div class="eyebrow mb-3">status</div>
+      <div class="flex items-center gap-2.5">
+        <span class="live-dot w-2 h-2 rounded-full shrink-0"></span>
+        <div class="text-[13px] text-slate-700 font-medium leading-tight">Design phase<br/><span class="text-[11px] text-slate-400 font-normal">thesis proven · productizing</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Main canvas ===== -->
+  <main class="flex-1 min-w-0 px-6 md:px-14 py-12 pb-28" style="max-width:1120px">
+
+    <!-- Hero -->
+    <header class="mb-12">
+      <div class="kicker eyebrow accent-text">Causal · learned · calibrated · state-aware — grounding for coding agents</div>
+      <h1 class="mt-4 text-4xl md:text-5xl font-medium tracking-tighter leading-[1.05] text-slate-900">
+        The <span class="accent-text">Org World Model</span><br/>a persistent causal substrate that grounds AI coding agents
+      </h1>
+      <p class="mt-5 text-slate-500 leading-relaxed max-w-[74ch] text-[15.5px]">
+        OWM answers <em>"given how this organization actually behaves, what is the blast radius of this change — which hidden couplings, which owners, which past incidents, and how confident are we?"</em> — and it gets <strong class="text-slate-700 font-semibold">sharper every time reality proves it right or wrong</strong>. The primary consumer is the coding agent. OWM is an <em>engine</em>: sell the engine, not the seat.
+      </p>
+      <div class="flex flex-wrap gap-2 mt-6">
+        <span class="chip chip-accent"><span class="live-dot w-1.5 h-1.5 rounded-full"></span> thesis proven on a live system</span>
+        <span class="chip chip-neutral">HIDDEN-stratum Brier 0.013</span>
+        <span class="chip chip-neutral">7 deployables · ①–⑦</span>
+        <span class="chip chip-neutral">single-org · scale-out</span>
+        <span class="chip chip-outline">design · 2026-06-23</span>
+      </div>
+    </header>
+
+    <!-- Top callout -->
+    <div class="call info">
+      <div class="ic">◆</div>
+      <div><b>This is a productization design, not a build.</b> It extends — does not replace — the validated research spike (Online Boutique on live EKS, pre-registered protocol). It designs the path from a single-coupling artifact to a real, runnable, scale-out system, plus a phased roadmap. It does <b>not</b> build the services and does <b>not</b> design multi-tenant SaaS specifics.</div>
+    </div>
+
+    <!-- ============ §1 ============ -->
+    <section id="context" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">01</span>
+        <h2 class="sec-h">Context &amp; purpose</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+
+      <h3 class="sub-h">What the spike proved</h3>
+      <p>The spike validated the core thesis on a <strong>real microservice system</strong> (Google's Online Boutique on a live EKS cluster), with a pre-registered protocol and measured ground truth:</p>
+      <ul>
+        <li>A typed weighted causal graph answering <code>do(change, state) → blast radius</code> (noisy-OR propagation, state-gated) beats a stateless LLM at predicting the consequences of a change, <strong>and deepens</strong> from each incident.</li>
+        <li>Injected a hidden latency coupling (<code>EXTRA_LATENCY</code> on <code>productcatalogservice</code>); measured the blast set from distributed traces = <code>{frontend, recommendationservice}</code> (<code>checkoutservice</code>, which topology would implicate, was empirically excluded).</li>
+        <li><strong>Deepening:</strong> <code>0.083 → 0.013</code> after one incident; the learning-disabled ablation stays flat at <code>0.083</code> — proving the gain is the <em>learning</em>, not the seed graph.</li>
+      </ul>
+      <div class="call info"><div class="ic">✓</div><div><b>The mechanism is convincing on one coupling.</b> It is <b>not yet</b> a productized system: no persistence, single-app, single learned coupling, a one-shot script, no consumption surface. This design closes exactly those gaps.</div></div>
+
+      <h3 class="sub-h">North star (the product)</h3>
+      <div class="call info"><div class="ic">★</div><div>When an engineer (or their coding agent) is about to touch the system, OWM answers <em>"given how this organization actually behaves, what is the blast radius of this change — what hidden couplings, which owners, which past incidents, and how confident are we?"</em> — and it gets sharper every time reality proves it right or wrong. The primary <b>consumer is the coding agent</b>. OWM is an <em>engine</em>, consumed by any agent.</div></div>
+
+      <h3 class="sub-h">Scope &amp; non-goals</h3>
+      <table>
+        <thead><tr><th style="width:50%">In scope</th><th>Out of scope (noted, not designed here)</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Service decomposition; data model &amp; storage; the continuous learning loop; ingestion; the query/consumption surface (MCP + portable rules); end-to-end flows; tech-stack &amp; boundary justifications; a phased roadmap.</td>
+            <td>Actually building the services; multi-tenant/SaaS commercialization; re-litigating the thesis or the engine's math (settled by the spike).</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="call warn"><div class="ic">✦</div><div><b>Substrate-agnostic &amp; built in public.</b> No organization-specific hardcoding. Vimo/HIX is consumer #1; OpenSRE (the author's incident-investigation platform) is, at most, a <em>future adapter</em> — neither is baked into the core. The design targets a <b>single-org, scale-out</b> system.</div></div>
+    </section>
+
+    <!-- ============ §2 ============ -->
+    <section id="whatis" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">02</span>
+        <h2 class="sec-h">What OWM is — and is not</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>This section exists because the single most common misreading is <em>"isn't this just a graph database?"</em></p>
+      <p><strong>The model = structure + parameters + engine.</strong> Not the database; not a code-symbol graph.</p>
+      <ul>
+        <li><strong>Structure</strong> — a typed graph: services, config-knobs, datastores, incidents as nodes; <code>calls</code>, <code>depends_on</code>, <code>couples</code>, <code>config_affects</code> as edges.</li>
+        <li><strong>Parameters</strong> — <strong>Beta distributions</strong> on the learned edges: a probability <em>with</em> an uncertainty.</li>
+        <li><strong>Engine</strong> — initialization (parse), inference (<code>do</code>-propagation), and the update rule (learning).</li>
+      </ul>
+      <p>A <strong>graph DB is a map</strong> (what connects to what; you query for neighbors / reachability). A <strong>world model is a predictor of consequences</strong> (given an action <em>and the current state</em>, what happens — and it can be wrong, checked, corrected). The spike <em>measured</em> the gap:</p>
+
+      <div class="card p-6 md:p-8 my-6">
+        <div class="diagram-cap">The measured 6× gap — HIDDEN-stratum Brier (lower is better, <code>claude-opus-4-8</code>, n=5 self-consistency).</div>
+        <table>
+          <thead><tr><th>predictor</th><th>what it actually is</th><th class="num">HIDDEN-stratum Brier</th></tr></thead>
+          <tbody>
+            <tr><td>topology BFS over the static graph</td><td>a topology map you traverse for blast radius</td><td class="num">0.083</td></tr>
+            <tr><td>the full model, <strong>learning disabled</strong></td><td>the graph with no deepening</td><td class="num">0.083</td></tr>
+            <tr class="hi-row"><td class="text-slate-900 font-semibold">the full <strong>world model</strong></td><td>interventional + state-aware + deepening + calibrated</td><td class="num accent-text-strong" style="font-weight:700">0.013</td></tr>
+          </tbody>
+        </table>
+        <p class="text-[13px] text-slate-400" style="margin-top:4px">For reference within the spike: Opus+RAG landed at 0.027 and stateless Opus at 0.127 on the same stratum. The two static rows are identical (0.083) — the gap to 0.013 is <em>entirely</em> the learning.</p>
+      </div>
+
+      <p>The four behaviors that produce the gap — and that a graph DB structurally lacks:</p>
+      <div class="grid md:grid-cols-2 gap-4 my-6">
+        <div class="panel p-5"><div class="eyebrow mb-2 accent-text">behavior 1</div><div class="text-slate-900 font-semibold text-[15px] mb-1">Interventional, not associational</div><div class="text-[13.5px] text-slate-500 leading-relaxed"><code>do(change, state)</code> forward-propagates <em>probabilities</em> (noisy-OR), not "what's adjacent." Reachability is a strictly weaker query.</div></div>
+        <div class="panel p-5"><div class="eyebrow mb-2 accent-text">behavior 2</div><div class="text-slate-900 font-semibold text-[15px] mb-1">State-conditioned</div><div class="text-[13.5px] text-slate-500 leading-relaxed">The same change has a different blast radius on a healthy vs. a saturated system; a static graph is identical regardless of state.</div></div>
+        <div class="panel p-5"><div class="eyebrow mb-2 accent-text">behavior 3</div><div class="text-slate-900 font-semibold text-[15px] mb-1">Deepening from outcomes</div><div class="text-[13.5px] text-slate-500 leading-relaxed">Every incident updates edge <em>weights</em>; a <em>surprise</em> (judged safe, reality broke) adds a HIDDEN coupling the structure never had.</div></div>
+        <div class="panel p-5"><div class="eyebrow mb-2 accent-text">behavior 4</div><div class="text-slate-900 font-semibold text-[15px] mb-1">Calibrated</div><div class="text-[13.5px] text-slate-500 leading-relaxed">Every edge is a probability <em>with</em> an uncertainty (Beta), and we measure whether "70%" actually means 70%.</div></div>
+      </div>
+
+      <div class="call warn"><div class="ic">✦</div><div><b>OWM is also not a code-symbol graph.</b> It does not store a file/function/call-site graph of the org (that is what Sourcegraph / Serena / aider's repo-map do). Its grain is <b>service / config-knob / datastore / incident</b>. Code is used only to (a) map a change to the service/config it touches and (b) propose structural edges — then the fine detail is discarded (see §6).</div></div>
+
+      <h3 class="sub-h">Differentiation vs. prior art</h3>
+      <ul>
+        <li>The closest existing thing is a <strong>static, deterministic, LLM-free blast-radius tool</strong> (e.g. RepoOps <code>causal_blast_radius</code>): forward/reverse graph traversal, same answer every time — <strong>no incident learning, no confidence, no state-conditioning.</strong> That proves the <em>consumer surface</em> (an agent asking "what breaks?") is viable.</li>
+        <li>Memory/KG systems (official MCP memory server, Graphiti/Zep, mem0, Letta) are <em>associative</em> recall, not <em>interventional</em> <code>do()</code>.</li>
+        <li>Causal-incident-GNN work with learned edge weights, calibration, and hidden-coupling discovery exists <strong>in research</strong>, but is not packaged as an org-specific grounding service for a coding agent.</li>
+      </ul>
+      <div class="call info"><div class="ic">◆</div><div><b>OWM's empty niche:</b> an org-specific, <b>interventional, state-conditioned, self-correcting, calibrated</b> causal model that learns from the org's own incident history and serves calibrated blast-radius grounding to a coding agent. Lead with <b>causal + learned + calibrated + state-aware</b> — <em>not</em> "blast radius" (which already exists in static form).</div></div>
+    </section>
+
+    <!-- ============ ★ §3 SYSTEM ARCHITECTURE ============ -->
+    <section id="arch" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl accent-text">★</span>
+        <h2 class="sec-h">03 · System architecture — the spine</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>Everything decomposes along <strong>write / update / read</strong> around a central model store, with a hard line between the <strong>agent-agnostic engine</strong> and the <strong>per-agent integration kit</strong>. Validated spike code (<code>graph</code>, <code>propagate</code>, <code>learn</code>, <code>eval</code>) is promoted from scripts to services — not rewritten.</p>
+
+      <!-- AUTHORITATIVE LEGEND (correctness does not depend on linkStyle) -->
+      <div class="flex flex-wrap items-center gap-2.5 my-5">
+        <span class="eyebrow" style="margin-right:2px">Legend · paths</span>
+        <span class="legend-pill"><span class="swatch" style="background:rgb(217 119 6)"></span> WRITE · structure (sources → ④ → ③)</span>
+        <span class="legend-pill"><span class="swatch" style="background:rgb(225 29 72)"></span> UPDATE · deepening (incidents → ⑤ → ⑥ → ③) + the loop</span>
+        <span class="legend-pill"><span class="swatch" style="background:rgb(16 185 129)"></span> READ · grounding (③ → ② → ① → agent)</span>
+        <span class="legend-pill"><span class="swatch" style="background:rgb(100 116 139)"></span> adjunct / steer</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-2.5 mb-5">
+        <span class="eyebrow" style="margin-right:2px">Legend · semantics</span>
+        <span class="legend-pill"><span class="swatch dot" style="background:rgb(217 119 6)"></span> ④ structure PROPOSES (no causal weight)</span>
+        <span class="legend-pill"><span class="swatch dot" style="background:rgb(225 29 72)"></span> ⑤→⑥ outcomes DECIDE weight</span>
+        <span class="legend-pill"><span class="swatch dash" style="color:rgb(148 163 184)"></span> later / off-hot-path</span>
+      </div>
+
+      <div class="card p-5 md:p-7 my-6">
+        <div class="diagram-cap">Fig 0 — Master architecture. The three paths (WRITE / UPDATE / READ) are colored; the loop closes UPDATE back through reality. <strong>Signals propose structure; only outcomes decide weight.</strong> ① is the only thing the agent talks to; ⑦ is off the hot path.</div>
+        <div class="mmd-wrap panel-scroll">
+        <pre class="mermaid">
+flowchart TB
+  %% ===== SIGNAL SOURCES =====
+  subgraph SRC["SIGNAL SOURCES"]
+    direction LR
+    REPOS["registered<br/>service repos"]
+    K8S["k8s manifests<br/>+ traces (Tempo)"]
+    INC["incidents:<br/>alert / SLO,<br/>manual declare"]
+    UNS["unstructured:<br/>postmortems,<br/>Slack, ADRs<br/>(LATER phase)"]
+  end
+
+  %% ===== INGESTION (propose) vs OUTCOME (decide) HOSTS =====
+  ING["④ INGESTION WORKER · propose host<br/>BATCH · code-parse · topology · config<br/>(signals PROPOSE structure)"]
+  OUT["⑤ OUTCOME RECEIVER · decide host<br/>EVENT · trigger (alert/SLO/manual)<br/>+ trace-measure (Tempo) → blast set"]
+
+  %% ===== MODEL STATE =====
+  PG["③ MODEL STATE — POSTGRES (+ queue)<br/>nodes · edges (GIVEN / HIDDEN) · Beta params<br/>incident log · prediction log · ownership idx · model_version"]
+
+  %% ===== LEARNING =====
+  LEARN["⑥ LEARNING WORKER<br/>reconcile → SURPRISE vs prediction<br/>Beta update / surprise-gated HIDDEN propose<br/>bumps model_version"]
+
+  %% ===== READ PATH =====
+  READ["② READ SERVICE · Query / Grounding API<br/>+ embedded inference engine<br/>in-mem graph · do(change, state) → noisy-OR<br/>state-conditioned · calibrated · grounding pack"]
+  MCP["① MCP SERVER (thin)<br/>~3-4 trigger-rich tools"]
+  AGENT["CODING AGENT<br/>Claude Code · Codex"]
+  KIT["Integration kit<br/>AGENTS.md + always-on rules<br/>(CC hooks = later phase)"]
+  UI["Inspection UI<br/>(read-only over ②)"]
+
+  %% ===== OFFLINE =====
+  EVAL["⑦ OFFLINE EVAL HARNESS<br/>CI honesty gate · off the hot path"]
+
+  %% ---- WRITE path (structure): sources -> ingest -> propose -> PG ----
+  REPOS -->|"BATCH"| ING
+  K8S -->|"BATCH"| ING
+  ING -->|"propose structure"| PG
+
+  %% ---- UPDATE path (deepening): incidents -> outcome -> learn -> PG ----
+  INC -->|"EVENT"| OUT
+  OUT -->|"outcome events"| LEARN
+  LEARN -->|"grant / revoke weight · bump version"| PG
+
+  %% ---- LATER unstructured -> ingest ----
+  UNS -.->|"LATER · LLM extraction"| ING
+
+  %% ---- READ path (grounding): PG -> read -> MCP -> agent ----
+  PG -->|"load graph → memory"| READ
+  READ --> MCP
+  MCP -->|"MCP"| AGENT
+
+  %% ---- integration kit steers agent; UI reads read-svc ----
+  KIT -->|"steers"| AGENT
+  UI -.->|"reads"| READ
+
+  %% ---- THE LOOP: agent ships change -> reality -> outcome receiver ----
+  AGENT -->|"acts on grounding · ships change"| REALITY["reality<br/>(breaks / holds)"]
+  REALITY -->|"measured outcome"| OUT
+
+  %% ---- offline eval reads model state, off hot path ----
+  PG -.->|"CI only · reads ③"| EVAL
+
+  classDef src fill:#f8fafc,stroke:#e2e8f0,color:#334155;
+  classDef write fill:#fff7ed,stroke:#fed7aa,color:#9a3412;
+  classDef state fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-width:2px;
+  classDef update fill:#fef2f2,stroke:#fecaca,color:#9f1239;
+  classDef read fill:#ecfdf5,stroke:#a7f3d0,color:#065f46;
+  classDef adjunct fill:#ffffff,stroke:#e2e8f0,color:#475569;
+  classDef offline fill:#f1f5f9,stroke:#cbd5e1,color:#475569;
+
+  class REPOS,K8S,INC,UNS src;
+  class ING write;
+  class PG state;
+  class OUT,LEARN update;
+  class READ,MCP read;
+  class AGENT,REALITY adjunct;
+  class KIT,UI adjunct;
+  class EVAL offline;
+
+  linkStyle 0,1,2 stroke:#d97706,stroke-width:2.5px;
+  linkStyle 3,4,5 stroke:#e11d48,stroke-width:2.5px;
+  linkStyle 6 stroke:#f59e0b,stroke-width:1.8px;
+  linkStyle 7,8,9 stroke:#10b981,stroke-width:2.8px;
+  linkStyle 10,11 stroke:#64748b,stroke-width:1.8px;
+  linkStyle 12,13 stroke:#e11d48,stroke-width:2.5px;
+  linkStyle 14 stroke:#94a3b8,stroke-width:1.6px;
+        </pre>
+        </div>
+      </div>
+
+      <div class="call info"><div class="ic">◆</div><div><b>The loop is the whole point.</b> The agent acts on the grounding pack → ships a change → reality breaks or holds → ⑤ measures the outcome → ⑥ deepens the model → the <em>next</em> grounding is sharper. The agent's own shipped change becomes the next training signal.</div></div>
+
+      <h3 class="sub-h">The seven components (deployables ①–⑦ — detailed in §9)</h3>
+      <table>
+        <thead><tr><th style="width:140px">Component</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><strong>① MCP server</strong> <span class="chip chip-accent">new</span></td><td>A thin adapter over the read service exposing ~3-4 trigger-rich tools; runs local-stdio or remote-HTTP. Consumed by the coding agent.</td></tr>
+          <tr><td><strong>② Read service</strong> <span class="chip chip-neutral">new + reuse</span></td><td>The Query/Grounding API with the <strong>embedded inference engine</strong>: loads the persisted graph into memory and serves <code>do(change, state)</code> → the grounding pack. Stateless compute → scales horizontally.</td></tr>
+          <tr><td><strong>③ Model state — Postgres (+ queue)</strong> <span class="chip chip-accent">new</span></td><td>System of record for nodes, edges (with provenance), Beta params, the incident log, ownership index, and model versions/snapshots. Closes the spike's "rebuilt each run" gap (§4).</td></tr>
+          <tr><td><strong>④ Ingestion worker</strong> <span class="chip chip-neutral">new + reuse</span></td><td>Hosts the <strong>batch</strong> structure adapters; the code-parse adapter collapses repos <em>up</em> to a <strong>file→service ownership index + config-knob inventory</strong> (no symbol graph); the topology adapter seeds GIVEN edges. All emit a normalized envelope.</td></tr>
+          <tr><td><strong>⑤ Outcome receiver</strong> <span class="chip chip-accent">new</span></td><td>Hosts the <strong>event-driven</strong> outcome adapters (trigger → measure the blast set from traces); emits outcome events.</td></tr>
+          <tr><td><strong>⑥ Learning worker</strong> <span class="chip chip-neutral">reuse</span></td><td>Consumes outcomes continuously; Beta updates + surprise-gated HIDDEN-edge proposals; bumps the model version.</td></tr>
+          <tr><td><strong>⑦ Offline eval harness</strong> <span class="chip chip-neutral">reuse</span></td><td>Out of the live path; the honesty gate + regression detector in CI.</td></tr>
+        </tbody>
+      </table>
+      <p>Plus a read-only <strong>inspection UI</strong> (unnumbered adjunct over ②) and the <strong>integration kit</strong> (shipped <code>AGENTS.md</code> + always-on rules; CC hooks deferred) — artifacts, not running core services.</p>
+    </section>
+
+    <!-- ============ §4 ============ -->
+    <section id="data" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">04</span>
+        <h2 class="sec-h">Data model &amp; storage (component ③)</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+
+      <div class="call info"><div class="ic">◆</div><div><b>The principle — event-sourced truth.</b> The <b>durable</b> source of truth is <b>(a) GIVEN structure</b> + <b>(b) the append-only incident/outcome log</b>. The <b>learned Beta weights are <em>derived</em></b> by replaying the log through the learning rule. The model is therefore both <b>reproducible</b> (replay → identical weights → the honesty guarantee) <b>and</b> <b>fast to load</b> (materialized snapshots per version). Load-and-continue and rebuild-from-scratch yield the same model.</div></div>
+      <p>This is how the README's "not persisted today / rebuilt each run" gap is closed <em>without</em> sacrificing reproducibility.</p>
+
+      <div class="card p-6 md:p-8 my-6">
+        <div class="diagram-cap">Fig 1 — Schema (ER). Solid = referential link · dashed = evidence/derivation. The <span class="accent-text">green</span> edge is the event-sourced core: weights are derived by replaying the immutable log.</div>
+        <div class="mmd-wrap panel-scroll">
+        <pre class="mermaid">
+flowchart TB
+  NODE["<b>node</b><br/>id · type {service | config_knob |<br/>datastore | incident} · key ·<br/>attrs (jsonb) · first_seen · last_seen ·<br/>provenance · env"]
+  EDGE["<b>edge</b><br/>src → dst · type {calls | depends_on |<br/>couples | config_affects} ·<br/>provenance {GIVEN | HIDDEN} ·<br/>beta_alpha, beta_beta ← weight + uncertainty ·<br/>state_mask ← state-conditioning ·<br/>status {active | candidate | dormant} ·<br/>evidence (jsonb → incidents) ·<br/>model_version_introduced"]
+
+  INCLOG["<b>incident / outcome log</b><br/>declared_at · trigger_src · window ·<br/>change_ref · observed_blast_set ·<br/>state_at_time · env · raw_signals · schema_ver"]
+  PREDLOG["<b>prediction log</b><br/>made_at · change_ref ·<br/>predicted_blast (ranked) · state ·<br/>model_version · grounding_pack · schema_ver"]
+  MODELV["<b>model_version</b><br/>id · parent · created_at ·<br/>rule_version · summary ·<br/>metrics (jsonb) · snapshot"]
+  OWNIDX["<b>ownership index</b><br/>repo · path_glob → service ·<br/>source {manifest | codeowners |<br/>convention | image} · conf"]
+
+  NODE -->|"src"| EDGE
+  NODE -->|"dst"| EDGE
+  EDGE -.->|"evidence"| INCLOG
+  MODELV -->|"introduced in"| EDGE
+  MODELV -->|"stamps"| PREDLOG
+  MODELV -->|"parent (DAG)"| MODELV
+
+  INCLOG <-->|"reconcile → SURPRISE"| PREDLOG
+  INCLOG -->|"replay through learning rule<br/>→ DERIVES Beta weights"| EDGE
+
+  NOTE["event-sourced truth:<br/>durable = GIVEN structure + append-only log;<br/>Beta weights are DERIVED by replaying the immutable log<br/>→ reproducible AND fast to load (snapshots per version)"]
+  NOTE -.-> INCLOG
+
+  classDef ent fill:#ffffff,stroke:#a7f3d0,color:#065f46;
+  classDef log fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-width:2px;
+  classDef meta fill:#f8fafc,stroke:#e2e8f0,color:#334155;
+  classDef note fill:#fff7ed,stroke:#fed7aa,color:#9a3412;
+  class NODE,EDGE ent;
+  class INCLOG,PREDLOG log;
+  class MODELV,OWNIDX meta;
+  class NOTE note;
+
+  linkStyle 6 stroke:#e11d48,stroke-width:2px;
+  linkStyle 7 stroke:#10b981,stroke-width:2.5px;
+        </pre>
+        </div>
+      </div>
+
+      <h3 class="sub-h">What this buys</h3>
+      <ul>
+        <li><strong>Model versioning / rollback</strong> — <code>model_version</code> is a parent-linked DAG; each learning update bumps a version with its metrics. Rollback = repoint the serving projection at an earlier version. Also yields the <strong>deepening curve over time</strong> for free.</li>
+        <li><strong>Prediction ⇄ outcome reconciliation</strong> — every grounding answer is recorded with its <code>model_version</code>. When an outcome later lands for a matching change, measured-vs-predicted divergence <strong>is the surprise signal</strong> (§8).</li>
+        <li><strong>The in-memory graph is a projection</strong>, not a separate truth — the inference engine loads the latest <code>model_version</code>. The graph is small (~thousands of nodes), so a full in-memory load is trivial; Postgres owns durability and concurrency.</li>
+      </ul>
+
+      <div class="call info"><div class="ic">◆</div><div><b>Storage choice — why Postgres, not a graph DB.</b> The hot operation is <b>noisy-OR propagation with state masks + Beta sampling</b> — not a graph-DB traversal primitive (not expressible as Cypher) — and the Beta/version/log tables are inherently relational. Postgres serves all of it; the graph fits in RAM for traversal. A native graph DB (Neo4j/Memgraph) would split the truth and buy traversal that isn't needed. <b>Revisit only if the graph ever outgrows memory — not a single-org concern.</b> The substrate remains swappable by design.</div></div>
+    </section>
+
+    <!-- ============ §5 ============ -->
+    <section id="schema" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">05</span>
+        <h2 class="sec-h">Schema evolution &amp; extensibility</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>OWM's whole promise is "new signals plug in and the model grows richer <strong>without the core changing</strong>." That requires schema evolution to be cheap.</p>
+
+      <h3 class="sub-h">The mechanism: stable skeleton + open vocabulary + type registry + versioned log</h3>
+      <div class="panel p-6 my-6">
+        <pre class="code">┌───────────────────────────────────────────────────────────────┐
+│ <span class="k">TYPE REGISTRY</span>   (data/config — adapters register new types)    │
+│   per node-type:  role = <span class="s">causal | structural | annotation</span>      │
+│   per edge-type:  <span class="s">propagates? · carries Beta? · proposable-by</span>     │
+│   → the engine <span class="k">ASKS</span> the registry; it never hardcodes the list  │
+└───────────────────────────────┬───────────────────────────────┘
+┌───────────────────────────────┴───────────────────────────────┐
+│ <span class="k">OPEN VOCABULARY</span> (jsonb)          <span class="k">STABLE SKELETON</span> (columns)      │
+│  node.attrs / edge.attrs    +    node(id,type,key,env) ·       │
+│  type-specific keys              edge(src,dst,type,provenance,  │
+│  → new type / new key: <span class="c">NO DDL</span>    beta,state_mask,status,ver)    │
+└───────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ <span class="k">IMMUTABLE EVENT LOG</span>  +  <span class="k">READ-TIME UPCASTERS</span>                     │
+│  every record stamped schema_version; history <span class="c">NEVER</span> rewritten;  │
+│  replay applies v1→v2→…→current upcasters → determinism intact  │
+└───────────────────────────────────────────────────────────────┘</pre>
+      </div>
+
+      <h3 class="sub-h">Evolution scenarios</h3>
+      <table>
+        <thead><tr><th>Scenario</th><th>What happens</th><th style="width:160px">Cost</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Add a node type</strong> (<code>team</code>, <code>queue</code>, <code>feature_flag</code>)</td><td>New registry entry declaring its <strong>role</strong> (<code>service</code>/<code>config_knob</code>/<code>datastore</code> are <em>causal</em>; <code>team</code>/<code>owner</code>/<code>doc</code> are <em>annotation</em> — surfaced in the pack, never propagated).</td><td><span class="dot g"></span>No DDL, no core change</td></tr>
+          <tr><td><strong>Add keys to a node</strong></td><td>Goes in <code>attrs</code> jsonb; old nodes tolerate absence.</td><td><span class="dot g"></span>Additive, zero migration</td></tr>
+          <tr><td><strong>Add an edge type</strong> (<code>shares_resource</code>, <code>documented_in</code>)</td><td>Registry entry declaring <strong>causal vs structural-only</strong>; propose/decide governs weight.</td><td><span class="dot g"></span>No DDL, no core change</td></tr>
+          <tr><td><strong>Rename / change meaning of a type</strong></td><td>History is immutable → handled by <strong>upcasters</strong> at replay; a <em>semantic</em> change is a <strong>new type</strong>, never a silent redefinition.</td><td><span class="dot a"></span>One upcaster fn</td></tr>
+          <tr><td><strong>Adapter emits a new shape</strong></td><td>The <strong>adapter envelope</strong> is the versioned, validated contract; core validates against schema version.</td><td><span class="dot g"></span>Adapter evolves independently</td></tr>
+          <tr><td><strong>Genuine relational change</strong> (index/table/column)</td><td>Standard <strong>Alembic</strong> migration; rare by design.</td><td><span class="dot a"></span>Normal migration</td></tr>
+          <tr><td><strong>Change the learning rule</strong></td><td>Stamp <code>rule_version</code> on <code>model_version</code>; re-derive weights by replaying the immutable log under the new rule → a new version branch.</td><td><span class="dot a"></span>Version branch, no data loss</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="sub-h">The two invariants this protects</h3>
+      <ol>
+        <li><strong>Replay-determinism (honesty)</strong> — history append-only; weights derived, never hand-edited; upcasters keep old logs replayable. Calibration/deepening claims stay reproducible across schema changes.</li>
+        <li><strong>Core-stability (extensibility)</strong> — adding signals/types/edges touches <em>only</em> the registry + a new adapter, never the engine, storage skeleton, or query API.</li>
+      </ol>
+      <div class="call info"><div class="ic">◆</div><div><b>Compatibility posture:</b> older engine + newer data → unknown types load as <b>inert annotations</b> (warn, don't crash); newer engine + older data → <b>upcasters</b> fill defaults. Additive-by-default; deprecate, never delete.</div></div>
+    </section>
+
+    <!-- ============ §6 ============ -->
+    <section id="ingest" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">06</span>
+        <h2 class="sec-h">Ingestion &amp; the adapter model</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>Every signal source is a <strong>plugin behind one interface</strong> (<code>source → normalized envelope</code>: <code>edge-proposal | edge-outcome | node-annotation</code>). That single interface is the extensibility seam. At runtime the plugins are hosted by <strong>two processes, split by path</strong> (because propose and decide have different invocation models):</p>
+
+      <div class="card p-6 md:p-8 my-6">
+        <div class="diagram-cap">Fig 2 — One adapter interface, two hosts. ④ batch/pull (signals PROPOSE structure) · ⑤ event/push (outcomes DECIDE weight). Tempo feeds both (topology batch + trace-measure event).</div>
+        <div class="mmd-wrap panel-scroll">
+        <pre class="mermaid">
+flowchart TB
+  IFACE["ONE ADAPTER INTERFACE<br/>source → normalized envelope<br/>(edge-proposal | edge-outcome | node-annotation)"]
+
+  subgraph INGEST["④ INGESTION WORKER"]
+    direction TB
+    ILBL["batch · pull · scheduled<br/>signals PROPOSE structure"]
+    CP["code-parse<br/>(repos → file→service)"]
+    TP["topology<br/>(k8s manifests + Tempo)"]
+    CF["config<br/>(config files / secret mgr)"]
+    LLM["[later] LLM extraction<br/>(postmortems / Slack / ADRs)"]
+  end
+
+  subgraph OUTREC["⑤ OUTCOME RECEIVER"]
+    direction TB
+    OLBL["event · push · webhook<br/>outcomes DECIDE weight"]
+    IA["incident / alert<br/>(PagerDuty / SLO webhook /<br/>manual declare)"]
+    TM["trace-measure<br/>(Tempo → observed<br/>blast set over window)"]
+  end
+
+  IFACE --> INGEST
+  IFACE --> OUTREC
+
+  INGEST -->|"emit PROPOSE envelopes"| PG["③ MODEL STATE (Postgres)"]
+  OUTREC -->|"emit DECIDE (outcome) envelopes"| PG
+
+  TEMPO["Tempo (traces)"]
+  TEMPO -.->|"GIVEN call edges (batch)"| TP
+  TEMPO -.->|"blast set during incident (event)"| TM
+
+  classDef iface fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-width:2px;
+  classDef ing fill:#fff7ed,stroke:#fed7aa,color:#9a3412;
+  classDef out fill:#fef2f2,stroke:#fecaca,color:#9f1239;
+  classDef state fill:#ecfdf5,stroke:#a7f3d0,color:#065f46;
+  classDef ext fill:#f8fafc,stroke:#e2e8f0,color:#334155;
+  class IFACE iface;
+  class ILBL,CP,TP,CF,LLM ing;
+  class OLBL,IA,TM out;
+  class PG state;
+  class TEMPO ext;
+        </pre>
+        </div>
+      </div>
+
+      <ul>
+        <li>A single <em>source</em> can appear in both hosts: <strong>Tempo</strong> feeds the <em>topology</em> adapter (batch, discover GIVEN call edges) <strong>and</strong> the <em>trace-measure</em> adapter (event, measure the blast set during an incident window).</li>
+        <li>Each adapter is a <strong>plugin within its host</strong>, not its own deployable — but the shared interface lets a heavy one (e.g. code-parse over a giant monorepo) be peeled into a standalone process later, purely as a deployment choice.</li>
+      </ul>
+
+      <div class="call info"><div class="ic">◆</div><div><b>The core principle: <em>signals propose, outcomes decide</em>.</b> Structural and decision signals (code, topology, config, and later Slack/ADRs/postmortems) may <b>propose</b> nodes/edges. <b>Only outcome signals</b> (incidents, SLO breaches, fault injection) <b>grant or revoke causal weight.</b> This is the rule that keeps OWM a world model and not "RAG over the wiki."</div></div>
+
+      <h3 class="sub-h">The code graph — grain &amp; scope (resolved)</h3>
+      <ul>
+        <li><strong>Grain:</strong> nodes are <strong>service / config-knob / datastore / incident</strong>. The code-parse adapter <strong>collapses code <em>up</em> to the service grain</strong> — it produces a <strong>file→service ownership index</strong> and a <strong>config-knob inventory</strong>, then discards the fine detail. No symbol graph is stored (that is another tool's job).</li>
+        <li><strong>Scope:</strong> only <strong>repos that own deployed services</strong> (the causally-relevant set), tracked in a <strong>registry</strong> and parsed on merge/deploy/schedule. The registry can be auto-populated from runtime topology (deploy image → source repo) or curated. Library/tooling repos enter only if/when they become causally relevant. <em>Not</em> "every repo in the org."</li>
+        <li><strong>Cross-service call edges</strong> are better sourced from <strong>runtime traces</strong> than static polyglot call-parsing; static parse is a weaker secondary source. The durable code-derived artifacts are the ownership index + config-knob inventory.</li>
+      </ul>
+
+      <h3 class="sub-h">Hybrid ingestion (batch + event)</h3>
+      <table>
+        <thead><tr><th style="width:200px">Signal</th><th>Mode</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Structure</strong></td><td><span class="chip chip-amber">batch</span></td><td>Slow-changing; idempotent reconcile on merge/deploy/schedule.</td></tr>
+          <tr><td><strong>Outcomes</strong></td><td><span class="chip chip-rose">event</span></td><td>Time-sensitive but low-volume → a simple durable queue, <em>not</em> Kafka.</td></tr>
+          <tr><td><strong>Re-derivation / backfill</strong></td><td><span class="chip chip-amber">batch</span></td><td>Rare; reuses the same learning-rule code.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ §7 ============ -->
+    <section id="infer" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">07</span>
+        <h2 class="sec-h">Inference &amp; the grounding query (read path)</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+
+      <h3 class="sub-h">How the agent describes "the change I'm about to make"</h3>
+      <p>The agent supplies any of: a <strong>diff/PR</strong>, a <strong>file path</strong>, or a <strong>service/config name</strong>. The Query API <strong>localizes</strong> it to graph node(s) via the <strong>ownership index</strong> (file/path → service) and the config-knob inventory. Localization is the <em>only</em> place code mapping is load-bearing at read time.</p>
+
+      <h3 class="sub-h">The query</h3>
+      <p><code>do(change, state)</code> runs over the in-memory projection: locate the change → forward-propagate noisy-OR over weighted, state-masked edges → a <strong>ranked, calibrated blast radius</strong>. State (<code>healthy | saturated | …</code>) is supplied by the caller or inferred from current telemetry (roadmap).</p>
+
+      <div class="card p-6 md:p-8 my-6">
+        <div class="diagram-cap">Fig 3 — The grounding pack returned to the agent. The structured pack returns immediately; LLM narration is optional and never blocks.</div>
+        <pre class="code">grounding_pack = {
+  <span class="k">blast_radius</span>:  [ {service, p, uncertainty, via:[edges]} … ],  <span class="m"># ranked</span>
+  <span class="k">hidden_couplings</span>: [ {a, b, why, confidence} … ],
+  <span class="k">ownership</span>:     [ {service, owner/team} … ],
+  <span class="k">related_incidents</span>: [ {id, when, summary} … ],
+  <span class="k">abstain</span>:       {should_ask: bool, reason} ,                   <span class="m"># roadmap</span>
+  <span class="k">narration</span>:     <span class="c">"&lt;optional LLM prose&gt;"</span>,                        <span class="m"># non-blocking</span>
+  <span class="k">model_version</span>: &lt;id&gt;
+}</pre>
+      </div>
+      <p>Every pack is written to the <strong>prediction log</strong> with its <code>model_version</code> to enable later reconciliation (§8).</p>
+
+      <h3 class="sub-h">MCP tools (the tiny surface)</h3>
+      <p>Deliberately tiny (~3-4 tools; the "≤8 tools or they get ignored" lesson):</p>
+      <table>
+        <thead><tr><th style="width:340px">Tool</th><th>Returns</th></tr></thead>
+        <tbody>
+          <tr><td><code>owm_ground(change, state)</code></td><td>Full grounding pack (the default).</td></tr>
+          <tr><td><code>owm_blast_radius(change, state)</code></td><td>Ranked calibrated set only.</td></tr>
+          <tr><td><code>owm_why_coupled(a, b)</code></td><td>Explanation + evidence for a coupling.</td></tr>
+          <tr><td><code>owm_record_outcome(change, observed, state)</code></td><td>Closes the loop (also reachable via ⑤).</td></tr>
+        </tbody>
+      </table>
+
+      <div class="call danger"><div class="ic">🔴</div><div><b>LLM is never in the prediction path.</b> Its role across the system is <b>extract</b> (ingestion edge: unstructured → proposed elements) + <b>serve/explain</b> (query edge: narration) + <b>offline baseline</b>. The prediction itself stays graph-native — that is the thesis.</div></div>
+
+      <div class="call warn"><div class="ic">✦</div><div><b>Proactivity is the hard part.</b> No MCP client supports server-driven automatic invocation — tools are <em>model-controlled</em>, so a bare MCP tool will be ignored on the changes that matter most. OWM wins it two ways: <b>portable</b> (trigger-rich tool descriptions + always-on <code>AGENTS.md</code>/rules — high-probability, every agent) and <b>deterministic</b> (a Claude Code <code>PreToolUse</code> hook that intercepts the change, injects the pack, can block — guaranteed, CC-only). The MVP ships the portable path; deterministic hooks are a clearly-marked later phase (§12).</div></div>
+    </section>
+
+    <!-- ============ §8 ============ -->
+    <section id="learn" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">08</span>
+        <h2 class="sec-h">The learning / deepening loop at scale (component ⑥)</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>The spike ran learning as a one-shot script over a fixed incident set. Productizing makes it a <strong>continuous, event-driven service</strong> with overfitting guards, state-conditioning, and a way to forget.</p>
+
+      <div class="card p-6 md:p-8 my-6">
+        <div class="diagram-cap">Fig 4 — The deepening loop. Reconcile → surprise → (low) Beta update / (high) structural propose with a WIDE Beta candidate → write + version bump → engine hot-reload. Hybrid governance gates the big claims.</div>
+        <div class="mmd-wrap panel-scroll">
+        <pre class="mermaid">
+flowchart TB
+  EVT["outcome event<br/>measured blast set + state_at_time<br/>+ change_ref + env"]
+  REC["RECONCILE<br/>fetch prediction @ live model_version<br/>(or compute counterfactual)<br/>SURPRISE := divergence(measured vs predicted)"]
+  EVT --> REC
+
+  BETA["BETA UPDATE<br/>existing edge(s): α / β += outcome<br/>CONDITIONED ON STATE<br/>(refines state_mask)"]
+  STRUCT["STRUCTURAL PROPOSE<br/>candidate HIDDEN coupling(s):<br/>shared datastore / config knob /<br/>temporal co-occurrence in traces<br/>→ status=candidate · WIDE Beta (low conf)"]
+
+  REC -->|"low surprise<br/>(confirms / denies)"| BETA
+  REC -->|"high surprise<br/>(broke something called safe)"| STRUCT
+
+  STRUCT -.->|"subsequent outcomes CONFIRM<br/>→ status=active, earns weight<br/>(or never → stays candidate / dormant)"| DECIDE["propose / decide,<br/>one level up<br/>(overfitting guard)"]
+
+  GOV{"HYBRID GOVERNANCE<br/>routine → auto-add candidate<br/>high-surprise / high-impact<br/>→ human review queue"}
+  BETA --> WRITE
+  STRUCT --> GOV
+  GOV --> WRITE
+  DECIDE -.-> WRITE
+
+  WRITE["WRITE Postgres · append immutable log<br/>· bump model_version"]
+  WRITE --> HOT["inference engine HOT-RELOADS projection<br/>→ next grounding is deeper"]
+
+  classDef ev fill:#fef2f2,stroke:#fecaca,color:#9f1239;
+  classDef proc fill:#ecfdf5,stroke:#a7f3d0,color:#065f46;
+  classDef gov fill:#fff7ed,stroke:#fed7aa,color:#9a3412;
+  classDef state fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-width:2px;
+  class EVT ev;
+  class REC,BETA,STRUCT,DECIDE,HOT proc;
+  class GOV gov;
+  class WRITE state;
+        </pre>
+        </div>
+      </div>
+
+      <div class="call info"><div class="ic">◆</div><div><b>Propose / decide, applied to learning itself (the overfitting guard).</b> A <b>single surprising incident never creates a confident coupling.</b> Surprise only <b>proposes a candidate</b> HIDDEN edge with a <em>wide</em> Beta; <b>subsequent outcomes decide</b> whether it earns weight. Real couplings sharpen with repeated incidents; flukes stay dormant and never pollute predictions. This is the same propose/decide rule, one level up.</div></div>
+
+      <h3 class="sub-h">Other at-scale properties</h3>
+      <ul>
+        <li><strong>State-conditioning is in the update</strong> — outcomes carry <code>state_at_time</code>, so a Beta update refines the <strong>state-conditional</strong> weight (<code>state_mask</code>), not a global one. The "money shot" becomes a learned property.</li>
+        <li><strong>Continuous-service mechanics</strong> — outcome → durable queue → learning worker → reconcile → update/propose → write + version-bump → engine atomically hot-swaps the in-memory projection (reads always see one consistent version). <strong>Ordering &amp; idempotency</strong> come free from the event log (fold the log forward; dedupe by outcome id). Periodic <strong>snapshots</strong> so the engine doesn't replay the whole log on boot.</li>
+        <li><strong>Batch vs streaming, sized to reality</strong> — incidents are <em>rare</em> (tens–hundreds/month for one org), so live deepening is <strong>streaming over a simple durable queue</strong> (Postgres-backed <code>SKIP LOCKED</code>, or Redis/SQS) — no Kafka/Flink. Only <strong>re-derivation</strong> is batch.</li>
+        <li><strong>Structural governance (hybrid)</strong> — routine surprises <strong>auto-add</strong> a candidate edge (low confidence, hands-off). <strong>High-surprise / high-impact</strong> hypotheses are queued for a quick <strong>human confirm</strong> before becoming trusted. Best of both: automatic deepening, with a human gating the big causal claims (which also builds trust early).</li>
+        <li><strong>Forgetting (designed-in now, implemented later)</strong> — couplings disappear when code is refactored. Two invalidation paths (bi-temporal ideas from Zep/Graphiti): (1) <strong>outcome-driven down-weighting</strong> (β accumulates when a coupling stops firing) and (2) <strong>structure-change invalidation</strong> (the structure adapter sees the shared substrate removed → the edge goes <code>dormant</code>). Dormant ≠ deleted — provenance/history kept (honesty). The schema's <code>status</code> field and immutable log support this from day one; the mechanism is built in a later phase.</li>
+        <li><strong>Honesty in production</strong> — the offline eval harness re-runs on a schedule (k-fold over the accumulated log) as a <strong>regression gate</strong>: if a learning change degrades held-out Brier, flag it. The honesty property stays <em>live</em>.</li>
+      </ul>
+    </section>
+
+    <!-- ============ §9 ============ -->
+    <section id="decomp" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">09</span>
+        <h2 class="sec-h">Service decomposition &amp; boundaries</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p><strong>Governing rule:</strong> don't rewrite the validated math. The core (<code>graph</code>, <code>propagate</code>, <code>learn</code>, <code>eval</code>) stays <strong>Python</strong> (networkx/numpy); services are deployment wrappers. FastAPI + pydantic (the pydantic models <em>are</em> the adapter envelopes and MCP <code>outputSchema</code>), official Python MCP SDK, Postgres (jsonb + Alembic).</p>
+
+      <div class="card p-6 md:p-8 my-6">
+        <div class="diagram-cap">Fig 5 — The 7 deployables (target / scale-out). Sync read path (① → ② → ③) in <span class="accent-text">green</span>; async write/update workers (④/⑤/⑥) feed ③. ⑦ + integration kit are off-runtime.</div>
+        <div class="mmd-wrap panel-scroll">
+        <pre class="mermaid">
+flowchart TB
+  AGENT["coding agent<br/>(CC / Codex)"]
+  HUMAN["human<br/>(browser)"]
+
+  MCP["① MCP SERVER (thin)<br/>local stdio OR remote HTTP<br/>~3-4 tools · sync · stateless"]
+  READ["② READ SERVICE (sync · low-latency · Nx)<br/>Query / Grounding API<br/>+ EMBEDDED inference engine<br/>(in-mem graph projection, noisy-OR)"]
+  PG["③ POSTGRES<br/>nodes / edges / Beta / log / versions / ownership<br/>+ QUEUE"]
+  ING["④ INGESTION WORKER<br/>structure adapters (code→service,<br/>topology, config) · async batch"]
+  OUT["⑤ OUTCOME RECEIVER<br/>webhook + trace-measure<br/>→ emit outcome events · async event"]
+  LEARN["⑥ LEARNING WORKER<br/>reconcile → Beta / propose HIDDEN /<br/>version bump · single ordered consumer"]
+  EVAL["⑦ OFFLINE EVAL HARNESS (CI)"]
+  KIT["INTEGRATION KIT<br/>AGENTS.md / rules"]
+
+  AGENT -->|"MCP"| MCP
+  MCP -->|"HTTP"| READ
+  HUMAN --> READ
+  READ -->|"read latest model_version"| PG
+
+  ING -->|"batch write"| PG
+  OUT -->|"outcome events (queue)"| LEARN
+  LEARN -->|"write + version bump"| PG
+
+  classDef thin fill:#ecfdf5,stroke:#a7f3d0,color:#065f46;
+  classDef read fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-width:2px;
+  classDef state fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-width:2px;
+  classDef worker fill:#fff7ed,stroke:#fed7aa,color:#9a3412;
+  classDef outcls fill:#fef2f2,stroke:#fecaca,color:#9f1239;
+  classDef off fill:#f1f5f9,stroke:#cbd5e1,color:#475569;
+  classDef ext fill:#f8fafc,stroke:#e2e8f0,color:#334155;
+
+  class MCP thin;
+  class READ read;
+  class PG state;
+  class ING worker;
+  class OUT,LEARN outcls;
+  class EVAL,KIT off;
+  class AGENT,HUMAN ext;
+        </pre>
+        </div>
+      </div>
+
+      <table>
+        <thead><tr><th class="num">#</th><th>Service</th><th>Sync/async</th><th>Scaling</th><th>Origin</th></tr></thead>
+        <tbody>
+          <tr><td class="num">①</td><td><strong>MCP server</strong> (thin; ~3-4 tools)</td><td>sync</td><td>stateless; local-stdio <em>or</em> remote-HTTP</td><td>new</td></tr>
+          <tr><td class="num">②</td><td><strong>Read service</strong> = Query/Grounding API <strong>+ embedded inference engine</strong></td><td><strong>sync, low-latency</strong></td><td>horizontal (each replica loads the projection)</td><td>new + <code>propagate</code>/<code>engine</code> reuse</td></tr>
+          <tr><td class="num">③</td><td><strong>Postgres + queue</strong></td><td>—</td><td>managed; queue Postgres-backed → Redis/SQS only if needed</td><td>new</td></tr>
+          <tr><td class="num">④</td><td><strong>Ingestion worker</strong> (structure adapters)</td><td><strong>async, batch</strong></td><td>one worker, pluggable tasks; split per-source later</td><td>new + <code>codegraph</code>/<code>topology</code> reuse</td></tr>
+          <tr><td class="num">⑤</td><td><strong>Outcome receiver</strong> (trigger→measure)</td><td>async, event</td><td>thin webhook + trace measurement</td><td>new</td></tr>
+          <tr><td class="num">⑥</td><td><strong>Learning worker</strong></td><td><strong>async, event-driven</strong></td><td>single consumer (ordered log-fold)</td><td>new + <code>learn</code> reuse</td></tr>
+          <tr><td class="num">⑦</td><td><strong>Offline eval harness</strong></td><td>CI job</td><td>not a runtime service</td><td>reuse <code>eval</code> + baselines</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="sub-h">Boundary justifications</h3>
+      <ul>
+        <li><strong>Engine embedded in the read service, not a separate hop</strong> — the agent waits mid-task; an extra network hop costs latency for no benefit (the graph fits in every replica). One sync read service.</li>
+        <li><strong>MCP is a thin separate adapter</strong> — agents consume MCP as a <strong>local stdio</strong> process next to them <em>or</em> a <strong>remote HTTP</strong> server; keeping it thin lets the same Query API serve both shapes and the human UI.</li>
+        <li><strong>Sync/async maps onto read/write/update</strong> — read = synchronous sub-second (structured pack returns immediately; LLM narration never blocks); write + update = async background workers decoupled by the queue.</li>
+        <li><strong>The collapse is a deployment choice, not a re-architecture</strong> — all runtime pieces share one Python core lib + one Postgres, so the MVP runs as <strong>one process</strong> (API+MCP+engine) + a <strong>CLI</strong> (batch ingest, manual outcomes), peeling off workers as volume grows (§12).</li>
+      </ul>
+
+      <h3 class="sub-h">Multi-env &amp; access control</h3>
+      <ul>
+        <li><strong>Multi-cluster/multi-env</strong> — nodes/state/outcomes carry an <code>env</code> tag; the model is <strong>env-conditioned</strong> (a coupling can be prod-only). MVP scopes to <strong>one env (prod)</strong>; multi-env is additive thanks to the registry+jsonb design.</li>
+        <li><strong>Access control</strong> — grounding data is org-internal (topology + incident metadata), not secrets. MVP = <strong>API token + MCP inside the trust boundary</strong>; authn/z at the gateway, fine-grained RBAC deferred.</li>
+      </ul>
+    </section>
+
+    <!-- ============ §10 ============ -->
+    <section id="flows" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">10</span>
+        <h2 class="sec-h">End-to-end flows</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+
+      <h3 class="sub-h">E2E #1 — Agent grounds itself before a change <span class="chip chip-accent" style="vertical-align:middle">read</span></h3>
+      <ol class="steps">
+        <li>Agent is about to edit <code>productcatalogservice</code> (file/diff/service). Per the <code>AGENTS.md</code>/rules kit, it calls <code>owm_ground(change, state)</code>.</li>
+        <li>MCP server ① → Read service ②. The Query API <strong>localizes</strong> the change via the ownership index → <code>productcatalogservice</code> node.</li>
+        <li>The embedded engine (within ②) runs <code>do(change, state)</code> over the in-memory graph → ranked calibrated blast radius; the API assembles the grounding pack (couplings, ownership, related incidents, abstain flag, optional narration).</li>
+        <li>Pack returned to the agent; <strong>written to the prediction log</strong> with the live <code>model_version</code>. The agent incorporates it before acting.</li>
+      </ol>
+
+      <h3 class="sub-h">E2E #2 — An incident deepens the model <span class="chip chip-rose" style="vertical-align:middle">update · the moat</span></h3>
+      <ol class="steps">
+        <li>An alert/SLO breach fires (or a human declares an incident). The Outcome receiver ⑤ records the trigger and <strong>measures the observed blast set</strong> from traces over the incident window; emits an outcome event to the queue.</li>
+        <li>Learning worker ⑥ <strong>reconciles</strong> the measured set against the stored prediction for that change/state → computes <strong>surprise</strong>.</li>
+        <li>Low surprise → <strong>Beta update</strong> on existing edges (state-conditioned). High surprise → <strong>propose a candidate HIDDEN edge</strong> (wide Beta); if high-impact, route to the human review queue (hybrid governance).</li>
+        <li>Write to Postgres, append the immutable log, <strong>bump model_version</strong>; the read service hot-reloads its projection.</li>
+        <li><strong>Next time</strong> any agent touches anything near that coupling, E2E #1 already reflects it. The agent's own shipped change, and what broke or held, becomes the next outcome — closing the loop.</li>
+      </ol>
+
+      <h3 class="sub-h">E2E #3 — Structure reconcile <span class="chip chip-amber" style="vertical-align:middle">write</span></h3>
+      <ol class="steps">
+        <li>A merge/deploy (or schedule) triggers the Ingestion worker ④.</li>
+        <li>The code-parse adapter re-parses registered service repos → updates the ownership index + config-knob inventory; the topology adapter refreshes GIVEN edges from manifests + traces.</li>
+        <li>Adapters emit <strong>propose</strong> envelopes; the model state ③ is reconciled idempotently (GIVEN structure updated; learned weights untouched). Structure changes can trigger <strong>forgetting</strong> (a removed substrate → dormant edge) in a later phase.</li>
+      </ol>
+    </section>
+
+    <!-- ============ §11 ============ -->
+    <section id="stack" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">11</span>
+        <h2 class="sec-h">Tech stack (summary)</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <table>
+        <thead><tr><th style="width:180px">Concern</th><th>Choice</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="text-slate-800 font-medium">Core language</td><td><strong>Python ≥3.10</strong> throughout the backend</td><td>Don't rewrite validated math (networkx/numpy)</td></tr>
+          <tr><td class="text-slate-800 font-medium">API</td><td><strong>FastAPI + pydantic</strong></td><td>async; pydantic = adapter envelopes + MCP <code>outputSchema</code></td></tr>
+          <tr><td class="text-slate-800 font-medium">Agent interface</td><td><strong>Official Python MCP SDK</strong> + <code>AGENTS.md</code>/rules kit</td><td>portable across Claude Code/Codex/Cursor/Cline/Windsurf</td></tr>
+          <tr><td class="text-slate-800 font-medium">Store</td><td><strong>Postgres</strong> (jsonb skeleton, Alembic)</td><td>relational Beta/log/version + small in-RAM graph</td></tr>
+          <tr><td class="text-slate-800 font-medium">Queue</td><td><strong>Postgres-backed</strong> (<code>SKIP LOCKED</code>) → Redis/SQS if needed</td><td>incidents are low-volume; no Kafka</td></tr>
+          <tr><td class="text-slate-800 font-medium">In-memory graph</td><td><strong>networkx</strong> (reuse)</td><td>proven; fine at single-org scale</td></tr>
+          <tr><td class="text-slate-800 font-medium">Inspection UI</td><td>minimal (server-rendered or small SPA)</td><td>secondary; can be deferred</td></tr>
+          <tr><td class="text-slate-800 font-medium">Deploy</td><td>containers; k8s-native but generic</td><td>author runs EKS; design stays substrate-agnostic</td></tr>
+          <tr><td class="text-slate-800 font-medium">LLM</td><td>extraction (ingest) + narration (serve) + offline baseline</td><td>never in the prediction path</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ §12 ============ -->
+    <section id="roadmap" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">12</span>
+        <h2 class="sec-h">Phased roadmap</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>The thesis is proven, so phasing is "make the proven engine grounded, persistent, and queryable by my agent on my real system" first, then automate and scale. Every phase reuses the spike core; nothing is throwaway; the 7 deployables start <strong>collapsed</strong> and peel apart as volume justifies.</p>
+
+      <div class="call info"><div class="ic">★</div><div><b>The smallest first slice — MVP "walking skeleton."</b> One Python process (API + MCP + embedded engine) + a CLI + Postgres. It delivers the <em>entire loop</em> — ingest → agent gets grounded → record outcome → model deepens — on the user's <b>real</b> system, and it includes <b>manual deepening</b> (without it, an MVP would just be a static blast-radius tool, i.e. RepoOps, not OWM). The first commit-worthy increment is <em>persist + read + MCP</em> (grounding works day one); manual-outcome deepening lands immediately after.</div></div>
+
+      <div class="phase">MVP — walking skeleton · 1 process + CLI + Postgres</div>
+      <ul>
+        <li><strong>Persist</strong> the event-sourced model (minimal schema: nodes/edges/Beta/incident log/ownership/model_version) — the one big <em>new</em> thing; closes the persistence gap.</li>
+        <li><strong>Ingest structure</strong> for <strong>1–few registered service repos</strong>: code-parse → ownership index + service/config-knob nodes; k8s manifests → GIVEN edges (reuse).</li>
+        <li><strong>Read service</strong>: embed the engine; serve the grounding pack via <code>ground</code> / <code>blast_radius</code> (reuse).</li>
+        <li><strong>MCP server</strong> (~3 tools) + <strong><code>AGENTS.md</code>/rules kit</strong> — makes it work inside Claude Code/Codex.</li>
+        <li><strong>Manual outcomes</strong>: a CLI/API to declare an incident + observed blast set → surprise-gated deepening + Beta update (reuse).</li>
+        <li><strong>One env (prod).</strong></li>
+      </ul>
+      <p style="margin-top:6px"><span class="chip chip-accent">▸ value</span> my coding agent is grounded on my real system — and it deepens.</p>
+
+      <div class="phase">P1 — automate the outcome feed</div>
+      <p>⑤ Outcome receiver: alert/SLO webhook + Tempo trace-measure (trigger→measure).<br/><span class="chip chip-accent">▸ value</span> deepening with zero manual effort — the moat goes self-serve.</p>
+
+      <div class="phase">P2 — continuous learning + governance</div>
+      <p>⑥ Learning worker (event/queue) · <strong>HYBRID</strong> structural review queue · model versioning/rollback surfaced.<br/><span class="chip chip-accent">▸ value</span> true continuous deepening at frequency; trust controls on big claims.</p>
+
+      <div class="phase">P3 — scale-out + visibility</div>
+      <p>multi-repo registry (auto-populate from topology) · ④ ingestion worker split · read service horizontal · inspection UI (graph · provenance · deepening curve).<br/><span class="chip chip-accent">▸ value</span> large-org scale; humans can see and trust the model.</p>
+
+      <div class="phase">P4 — proactivity + breadth</div>
+      <p>CC <code>PreToolUse</code>/<code>UserPromptSubmit</code> <strong>HOOKS</strong> (forcing function) · LLM extraction (postmortems/Slack/ADRs) · multi-env conditioning · forgetting/invalidation · abstain/ask in the pack.<br/><span class="chip chip-accent">▸ value</span> deterministic grounding; richer signals; staleness handled.</p>
+
+      <div class="phase">P5 — honesty-at-scale + hardening (ongoing)</div>
+      <p>scheduled k-fold eval regression gate (CI) · AURC/abstention · access-control/RBAC · hardened multi-agent rule kits · OSS "engine, not the seat" packaging.<br/><span class="chip chip-accent">▸ value</span> the honesty property stays live as the org scales.</p>
+
+      <div class="call info"><div class="ic">◆</div><div>This sequences directly from the decisions in this doc: portable consumption is in the MVP, <b>hooks deferred to P4</b>; <b>hybrid governance at P2</b>; <b>forgetting designed-in-now, built P4</b>; <b>LLM-extraction + multi-env at P4</b>; honesty-at-scale eval gate at P5. The collapse→peel deployment path means no rewrites between phases.</div></div>
+    </section>
+
+    <!-- ============ §13 ============ -->
+    <section id="decisions" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">13</span>
+        <h2 class="sec-h">Decision log</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>Every load-bearing decision made while designing this, with rationale:</p>
+      <table>
+        <thead><tr><th class="num" style="width:42px">#</th><th>Decision</th><th>Rationale</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td><strong>OWM is fully independent; OpenSRE is at most a future adapter.</strong></td><td>Keeps the core generic / built-in-public; avoids coupling to one platform.</td></tr>
+          <tr><td class="num">2</td><td><strong>Primary consumer = the coding agent</strong> (Claude Code/Codex).</td><td>OWM is the persistent, org-specific causal substrate stateless agents lack — that is the product, not a tagline.</td></tr>
+          <tr><td class="num">3</td><td><strong>Consumption = MCP server + portable <code>AGENTS.md</code>/rules kit; hooks deferred.</strong></td><td>MCP can't force invocation; portable rules are the cross-agent forcing path; deterministic CC hooks are a later upgrade. "Sell the engine, not the seat."</td></tr>
+          <tr><td class="num">4</td><td><strong>Differentiator = causal + state-conditioned + deepening + calibrated</strong>, not "blast radius."</td><td>Static blast-radius already exists; the four behaviors are the moat.</td></tr>
+          <tr><td class="num">5</td><td><strong>Graph store = Postgres (SoR) + in-memory projection</strong>, not a graph DB.</td><td>noisy-OR isn't Cypher; Beta/log/version are relational; graph fits in RAM.</td></tr>
+          <tr><td class="num">6</td><td><strong>Event-sourced truth</strong> (GIVEN structure + immutable outcome log; weights derived).</td><td>Closes the persistence gap <em>and</em> preserves reproducibility/honesty.</td></tr>
+          <tr><td class="num">7</td><td><strong>Schema evolution = stable skeleton + jsonb vocabulary + type registry + upcasters.</strong></td><td>New types/keys cost no DDL and no core change; renames cost one upcaster.</td></tr>
+          <tr><td class="num">8</td><td><strong>Ingestion = hybrid</strong> (batch structure, event outcomes); one adapter interface, two hosts.</td><td>Propose and decide have different invocation models.</td></tr>
+          <tr><td class="num">9</td><td><strong>Graph grain = service/config-knob/datastore/incident</strong>; code-parse collapses <em>up</em>; only service-owning repos ingested.</td><td>Keeps OWM out of the code-symbol-graph business; ingests only the causally-relevant set.</td></tr>
+          <tr><td class="num">10</td><td><strong>Incident feed = trigger vs. measure split</strong> (alert/SLO/manual trigger; blast set measured from traces).</td><td>Agent-action-as-outcome as a fast-follow.</td></tr>
+          <tr><td class="num">11</td><td><strong>LLM = extract (ingest) + serve/explain (query) + offline baseline; never in the prediction path.</strong></td><td>The prediction staying graph-native is the thesis.</td></tr>
+          <tr><td class="num">12</td><td><strong>Service decomposition = 7 deployables, Python throughout, engine embedded in the read service, thin MCP adapter, sync read / async workers.</strong></td><td>The collapse is a deployment choice, not a re-architecture.</td></tr>
+          <tr><td class="num">13</td><td><strong>Structural-learning governance = hybrid</strong> (auto-low-confidence; human review above a surprise/impact threshold).</td><td>Automatic deepening with a human gating the big causal claims; builds trust early.</td></tr>
+          <tr><td class="num">14</td><td><strong>Forgetting</strong> (decay + structure-change invalidation, dormant-not-deleted) = designed-in now, built in a later phase.</td><td>Couplings disappear when code is refactored; dormant ≠ deleted preserves honesty.</td></tr>
+          <tr><td class="num">15</td><td><strong>MVP = a walking skeleton</strong> delivering the full loop on the real system with manual outcomes, one env, one process + CLI.</td><td>Without manual deepening an MVP is just a static blast-radius tool.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ §14 GLOSSARY ============ -->
+    <section id="gloss" class="prose pt-12">
+      <div class="flex items-baseline gap-4">
+        <span class="num text-2xl text-slate-300">14</span>
+        <h2 class="sec-h">Glossary — key terms</h2>
+      </div>
+      <hr class="mt-4 mb-6 border-slate-200/70" />
+      <p>The vocabulary that recurs across this design. Each term is defined as used <em>here</em>, in OWM.</p>
+
+      <div class="card p-2 md:p-3 my-5">
+        <div class="divide-y divide-slate-100">
+          <div class="px-5 py-4">
+            <span class="gloss-term">do(change, state)</span>
+            <div class="gloss-def">The <strong>interventional</strong> query at OWM's core: "if I perform <em>this change</em> while the system is in <em>this state</em>, what happens?" It forward-propagates probabilities over the causal graph — strictly stronger than asking "what is adjacent" (reachability). The <code>state</code> argument is what makes the same change yield a different blast radius on a healthy vs. saturated system.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">blast radius</span>
+            <div class="gloss-def">The set of services/components put at risk by a change, returned <strong>ranked</strong> and <strong>calibrated</strong> (each with a probability and an uncertainty). OWM's differentiator is that this is causal + learned + state-aware — <em>not</em> the static, same-every-time blast radius a topology tool produces.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">GIVEN vs HIDDEN (edge provenance)</span>
+            <div class="gloss-def"><strong>GIVEN</strong> edges come from observable structure (code, topology, config) — they are <em>proposed</em> and carry no causal weight on their own. <strong>HIDDEN</strong> edges are couplings the structure never showed, discovered when reality surprises the model (something judged safe broke). Only outcomes turn a coupling into a weighted, trusted edge.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">Beta posterior</span>
+            <div class="gloss-def">The parameter on each learned edge: a Beta distribution (<code>α</code>, <code>β</code>) representing a probability <em>with</em> an uncertainty. A wide Beta = low confidence (a fresh candidate); repeated confirming outcomes sharpen it. This is what makes OWM <strong>calibrated</strong> rather than a single point estimate.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">noisy-OR</span>
+            <div class="gloss-def">The propagation rule the engine uses to combine multiple independent causal influences into a single probability that a downstream node is affected. It is the hot operation OWM runs over the in-memory graph — and the reason a relational/in-RAM store beats a graph DB (it is not a Cypher traversal primitive).</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">state-conditioning</span>
+            <div class="gloss-def">Edges carry a <code>state_mask</code>, so a coupling's strength depends on system state (e.g. a coupling that only fires when a service is saturated). Outcomes carry <code>state_at_time</code>, so a Beta update refines the <em>state-conditional</em> weight, not a global one. Behavior #2 of the four that separate a world model from a graph DB.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">deepening</span>
+            <div class="gloss-def">The model getting sharper from each outcome — the moat. Measured in the spike as the HIDDEN-stratum Brier dropping <code>0.083 → 0.013</code> after one incident, while the learning-disabled ablation stayed flat. Every incident updates weights; a surprise can add a whole new HIDDEN coupling.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">surprise-gated</span>
+            <div class="gloss-def">The trigger for structural learning: <strong>surprise</strong> = divergence between the measured blast set and what the model predicted. Low surprise → a Beta update on existing edges. High surprise → <em>propose</em> a candidate HIDDEN edge (with a wide Beta). A single surprise never creates a confident coupling — subsequent outcomes decide whether it earns weight.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">propose / decide</span>
+            <div class="gloss-def">OWM's central rule, applied at two levels. <strong>Ingestion:</strong> structural signals (code/topology/config/docs) <em>propose</em> nodes and edges, but <em>only outcomes</em> (incidents, SLO breaches, fault injection) <em>decide</em> causal weight. <strong>Learning:</strong> one surprising incident <em>proposes</em> a candidate edge; repeated outcomes <em>decide</em> whether it becomes active. This is what keeps OWM a world model and not "RAG over the wiki."</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">grounding pack</span>
+            <div class="gloss-def">The unit of consumption returned to the agent for "I'm about to do X": a ranked calibrated blast radius, relevant hidden couplings, ownership of affected services, related past incidents, an abstain/ask-a-human flag (roadmap), an optional LLM narration (never blocking), and the <code>model_version</code> it was computed under. Every pack is logged to the prediction log for later reconciliation.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">event-sourced (truth)</span>
+            <div class="gloss-def">The durable source of truth is the GIVEN structure + an <strong>append-only</strong> incident/outcome log; the learned Beta weights are <em>derived</em> by replaying the log through the learning rule. This makes the model both <strong>reproducible</strong> (replay → identical weights = the honesty guarantee) and <strong>fast to load</strong> (materialized snapshots per <code>model_version</code>). History is never rewritten; schema changes are absorbed by read-time upcasters.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">model_version</span>
+            <div class="gloss-def">A parent-linked DAG of model snapshots; every learning update bumps a version with its metrics. Enables rollback (repoint the serving projection at an earlier version) and yields the deepening curve over time for free. Every grounding answer records the version it used, so a later outcome can be reconciled against the exact prediction.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">grain (service / config-knob / datastore / incident)</span>
+            <div class="gloss-def">The level at which OWM models the org. It is deliberately <em>not</em> a code-symbol (file/function/call-site) graph — code is collapsed <em>up</em> to a file→service ownership index + config-knob inventory, then the fine detail is discarded. That keeps OWM out of Sourcegraph/Serena/repo-map territory.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">ownership index</span>
+            <div class="gloss-def">The durable code-derived artifact mapping <code>repo · path_glob → service</code> (sourced from manifests, CODEOWNERS, convention, or deploy image, with a confidence). It is what lets the read path <strong>localize</strong> a diff/file/service name to graph node(s) — the only place code mapping is load-bearing at query time.</div>
+          </div>
+          <div class="px-5 py-4">
+            <span class="gloss-term">forgetting (dormant ≠ deleted)</span>
+            <div class="gloss-def">How couplings expire when code is refactored away: outcome-driven down-weighting (β accumulates when a coupling stops firing) and structure-change invalidation (the substrate is removed → the edge goes <code>dormant</code>). Dormant edges keep their provenance/history (honesty); nothing is deleted. Designed-in now via the <code>status</code> field + immutable log; built in a later phase.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="mt-20 pt-6 border-t border-slate-200/70 num text-[12px] text-slate-400 leading-relaxed">
+      Org World Model (OWM) · architecture &amp; end-to-end design — internal design doc, productization of the OWM spike · 2026-06-23.<br/>
+      Source of truth: <code>docs/superpowers/specs/2026-06-23-owm-architecture-design.md</code> · public narrative: <code>README.md</code>, <code>docs/architecture-diagrams.md</code>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: "'Geist Mono', ui-monospace, monospace", fontSize: '13px',
+      background: '#ffffff',
+      primaryColor: '#f1f5f9', primaryTextColor: '#1e293b', primaryBorderColor: '#e2e8f0',
+      lineColor: 'rgb(5 150 105)', textColor: '#334155',
+      clusterBkg: '#f8fafc', clusterBorder: '#e2e8f0',
+      actorBkg: '#ecfdf5', actorBorder: '#a7f3d0', actorTextColor: '#065f46',
+      signalColor: '#64748b', signalTextColor: '#334155',
+      noteBkgColor: '#ecfdf5', noteTextColor: '#065f46', noteBorderColor: '#a7f3d0',
+      labelBoxBkgColor: '#f8fafc', labelBoxBorderColor: '#e2e8f0', labelTextColor: '#334155',
+      sequenceNumberColor: '#ffffff'
+    }
+  });
+
+  // scrollspy — highlight active TOC entry
+  const links = [...document.querySelectorAll('#toc a')];
+  const secs = links.map(a => document.querySelector(a.getAttribute('href')));
+  const obs = new IntersectionObserver(es => {
+    es.forEach(e => {
+      if (e.isIntersecting) {
+        const i = secs.indexOf(e.target);
+        if (i > -1) {
+          links.forEach(l => l.classList.remove('active'));
+          links[i].classList.add('active');
+        }
+      }
+    });
+  }, { rootMargin: '-15% 0px -75% 0px' });
+  secs.forEach(s => s && obs.observe(s));
+</script>
+
+</body>
+</html>
